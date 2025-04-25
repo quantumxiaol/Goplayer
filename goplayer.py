@@ -2,10 +2,10 @@ import tkinter as tk
 import tkinter.messagebox as messagebox
 import copy
 class GoBoard(tk.Frame):
-    def __init__(self, parent, size=19,reduce=7.5):
+    def __init__(self, parent, size=19):
         super().__init__(parent)
         self.size = size
-        self.reduce = reduce
+        self.reduce = self.komi()
         self.grid = [[None for _ in range(size)] for _ in range(size)]
         self.current_player = 'black'
         self.score = {'black': 0, 'white': 0}
@@ -13,6 +13,18 @@ class GoBoard(tk.Frame):
         self.canvas.bind('<Configure>', self.draw_board)
         self.canvas.bind('<Button-1>', self.place_stone)
         self.canvas.pack(fill=tk.BOTH, expand=1)
+
+    # 根据棋盘大小设置贴目
+    def komi(self):
+        if self.size == 19:
+            komi = 7.5
+        elif self.size == 13:
+            komi = 2.0  # 13x13 的贴目可以是 2 目
+        elif self.size == 9:
+            komi = 5.5  # 9x9 的贴目可以是 5.5 目
+        else:
+            komi = 0.0  # 默认不贴目
+        return komi
 
     def reset(self):
         """

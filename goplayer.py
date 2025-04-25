@@ -1,9 +1,11 @@
 import tkinter as tk
+import tkinter.messagebox as messagebox
 import copy
 class GoBoard(tk.Frame):
-    def __init__(self, parent, size=19):
+    def __init__(self, parent, size=19,reduce=7.5):
         super().__init__(parent)
         self.size = size
+        self.reduce = reduce
         self.grid = [[None for _ in range(size)] for _ in range(size)]
         self.current_player = 'black'
         self.score = {'black': 0, 'white': 0}
@@ -12,20 +14,45 @@ class GoBoard(tk.Frame):
         self.canvas.bind('<Button-1>', self.place_stone)
         self.canvas.pack(fill=tk.BOTH, expand=1)
 
+    def reset(self):
+        """
+        重置棋盘状态。
+        """
+        self.grid = [[None for _ in range(self.size)] for _ in range(self.size)]
+        self.current_player = 'black'
+        self.score = {'black': 0, 'white': 0}
+        self.draw_board()
     def draw_board(self, event=None):
         self.canvas.delete('all')
-        self.margin = 20
+        self.margin = 25
         self.width, self.height = self.canvas.winfo_width(), self.canvas.winfo_height()
         self.cell_size = (min(self.width, self.height) - 2 * self.margin) / (self.size - 1)
-        for i in range(self.size):
+
+        # 加粗最外边框
+        border_width = 3  # 边框宽度
+        self.canvas.create_rectangle(
+            self.margin, self.margin,
+            self.width - self.margin, self.height - self.margin,
+            outline='black', width=border_width
+        )
+
+        # 绘制网格线
+        for i in range(self.size ):  
             x = i * self.cell_size + self.margin
-            self.canvas.create_line(x, self.margin, x, self.height - self.margin)
-            self.canvas.create_line(self.margin, x, self.width - self.margin, x)
+            y = i * self.cell_size + self.margin
+            # 水平线
+            self.canvas.create_line(self.margin, y, self.width - self.margin, y, fill='black')
+            # 竖直线
+            self.canvas.create_line(x, self.margin, x, self.height - self.margin, fill='black')
+
+        # 绘制星位
+        self.draw_star_points()
+
+        # 绘制棋子
         for i in range(self.size):
             for j in range(self.size):
                 if self.grid[i][j] is not None:
                     self.draw_stone(i, j, self.grid[i][j])
-
     def place_stone(self, event):
         row = round((event.x - self.margin) / self.cell_size)
         col = round((event.y - self.margin) / self.cell_size)
@@ -44,6 +71,35 @@ class GoBoard(tk.Frame):
             else:
                 self.current_player = 'white' if self.current_player == 'black' else 'black'
         print(self.score)
+
+    def draw_star_points(self):
+        """
+        在棋盘上绘制星位标记。
+        """
+        if self.size == 19:  # 标准 19x19 棋盘
+            star_points = [(3, 3), (9, 3), (15, 3),
+                           (3, 9), (9, 9), (15, 9),
+                           (3, 15), (9, 15), (15, 15)]
+        elif self.size == 13:  # 13x13 棋盘
+            star_points = [(3, 3), (6, 3), (9, 3),
+                           (3, 6), (6, 6), (9, 6),
+                           (3, 9), (6, 9), (9, 9)]
+        elif self.size == 9:  # 9x9 棋盘
+            star_points = [(2, 2), (4, 2), (6, 2),
+                           (2, 4), (4, 4), (6, 4),
+                           (2, 6), (4, 6), (6, 6)]
+        else:
+            return  # 其他尺寸棋盘不绘制星位
+
+        # 绘制星位
+        for row, col in star_points:
+            x = col * self.cell_size + self.margin
+            y = row * self.cell_size + self.margin
+            radius = self.cell_size / 10  # 星位半径
+            self.canvas.create_oval(
+                x - radius, y - radius, x + radius, y + radius,
+                fill='black'
+            )
 
     def draw_stone(self, row, col, color):
         x = row * self.cell_size + self.margin
@@ -88,9 +144,41 @@ class GoBoard(tk.Frame):
                             self.score[self.current_player] += 1
                         self.draw_board()
 
+# 根据棋盘状态判断胜负，子多的获胜，其中黑子因为先手贴目要-7.5(19路)，白子不变
+# 关闭棋盘是判断胜负的并输出结果
+    def judge_winner(self):
+
+        black_score = sum(row.count('black') for row in self.grid)- self.reduce
+        white_score = sum(row.count('white') for row in self.grid)
+        
+        if black_score > white_score:
+            result= 'black'
+        elif white_score >= black_score:
+            result= 'white'
+        # 输出结果
+        print(f"黑子得分：{black_score}，白子得分：{white_score}")
+        print(f"胜者：{result}")
+
+        messagebox.showinfo("比赛结果", result)
+
+        return result
+
+
+
+
 if __name__ == "__main__":
     root = tk.Tk()
-    root.geometry('800x800')  # You can set the geometry to be the size you want
+    root.geometry('700x700')  # You can set the geometry to be the size you want
     board = GoBoard(root, size=19)
     board.pack(fill=tk.BOTH, expand=1)
+    # 创建菜单栏
+    menubar = tk.Menu(root)
+    file_menu = tk.Menu(menubar, tearoff=0)
+    file_menu.add_command(label="New Game", command=board.reset)  # 使用 reset 方法重置棋盘
+    file_menu.add_command(label="Judge Winner", command=lambda: print(board.judge_winner()))
+    menubar.add_cascade(label="option", menu=file_menu)
+
+    # 将菜单栏绑定到主窗口
+    root.config(menu=menubar)
+
     root.mainloop()

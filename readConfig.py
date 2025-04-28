@@ -1,5 +1,12 @@
 # 从config.yaml中读取配置,config.yaml和readConfig.py在同一目录下
 
+# --config.yaml--
+# OpenAI:
+#   model: "gpt-3.5-turbo"
+#   api_key: "your_api_key"
+#   api_base: "https://api.openai.com/v1/chat/completions"
+
+
 import yaml
 import os
 import sys

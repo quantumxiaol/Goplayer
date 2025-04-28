@@ -229,7 +229,19 @@ class GoBoard(tk.Frame):
         if self.current_player.make_move(self):
             self.switch_player()
 
+    # 悔棋功能
+    def undo_move(self):
+        if self.grid:
+            last_move = self.grid.pop()
+            row, col = last_move
+            self.grid[row][col] = None
+            self.draw_board()
+            self.current_player = 'white' if self.current_player == 'black' else 'black'
+            print(f"Undo move: {last_move}")
+            print(f"Current player: {self.current_player}")
+            self.remove_captured_stones(self.current_player)
 
+    # 提示功能
 
 # 根据棋盘状态判断胜负，子多的获胜，其中黑子因为先手贴目要-7.5(19路)，白子不变
 # 关闭棋盘是判断胜负的并输出结果
@@ -246,6 +258,7 @@ class GoBoard(tk.Frame):
         print(f"黑子得分：{black_score}，白子得分：{white_score}")
         print(f"胜者：{result}")
 
-        messagebox.showinfo("比赛结果", result)
+        messagebox.showinfo("比赛结果", f"黑子得分：{black_score}，白子得分：{white_score}\n胜者：{result}")
+        # messagebox.showinfo("比赛结果", result)
 
         return result

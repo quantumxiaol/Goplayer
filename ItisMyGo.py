@@ -24,6 +24,7 @@ if __name__ == "__main__":
     file_menu = tk.Menu(menubar, tearoff=0)
     file_menu.add_command(label="新游戏", command=board.reset)
     file_menu.add_command(label="判断胜负", command=board.judge_winner)
+    file_menu.add_command(label="悔棋", command=board.undo_move)
     menubar.add_cascade(label="选项", menu=file_menu)
 
     # 将菜单栏绑定到主窗口

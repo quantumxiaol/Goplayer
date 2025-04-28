@@ -5,7 +5,7 @@ import random
 import openai
 import os
 from readConfig import get_openai_config
-from goplayer import HumanPlayer, AIPlayer
+from goplayer import HumanPlayer, AIPlayer,RandomPlayer
 
 class GoBoard(tk.Frame):
     def __init__(self, parent, size=19):
@@ -120,6 +120,9 @@ class GoBoard(tk.Frame):
             ai_color = 'white'
             self.players[human_color] = HumanPlayer(human_color)
             self.players[ai_color] = AIPlayer(ai_color)
+        elif self.mode == "random_vs_random":
+            self.players['black'] = RandomPlayer('black')
+            self.players['white'] = RandomPlayer('white')
         self.current_player = self.players['black']  # 初始玩家为黑方
         print(f"Players initialized: {self.players}")
         print(f"Current player: {self.current_player}")
@@ -212,6 +215,9 @@ class GoBoard(tk.Frame):
         if isinstance(self.current_player, HumanPlayer):
             if self.current_player.make_move(self, event):
                 self.switch_player()
+        # if isinstance(self.current_player, RandomPlayer):
+        #     if self.current_player.make_move(self, event):
+        #         self.switch_player()
 
     def switch_player(self):
         """
@@ -244,7 +250,7 @@ class GoBoard(tk.Frame):
     # 提示功能
 
 # 根据棋盘状态判断胜负，子多的获胜，其中黑子因为先手贴目要-7.5(19路)，白子不变
-# 关闭棋盘是判断胜负的并输出结果
+# 判断胜负的并输出结果
     def judge_winner(self):
 
         black_score = sum(row.count('black') for row in self.grid)- self.reduce

@@ -1,6 +1,9 @@
 # Goplayer
 一个python写的简单的围棋程序，使用Tkinter库
 
+人机对战只是用来练习调用LLM API的，实际下棋不应该和GPT下，肯定下不过KataGo
+
+
 # 任务
 
 - [x] 创建棋盘

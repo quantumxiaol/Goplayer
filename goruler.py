@@ -39,7 +39,6 @@ def is_capture_move(board, row, col, color):
 
 # 判断落子是否合法
 def is_valid_move(board, row, col, color):
-    """\n"""
     size = board.size
     if row < 0 or row >= size or col < 0 or col >= size:
         return False

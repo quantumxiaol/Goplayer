@@ -19,6 +19,7 @@ if __name__ == "__main__":
     mode_menu = tk.Menu(menubar, tearoff=0)
     mode_menu.add_command(label="人人对弈", command=lambda: board.setup_mode("human_vs_human"))
     mode_menu.add_command(label="人机对弈", command=lambda: board.setup_mode("human_vs_ai"))
+    mode_menu.add_command(label="随机对弈", command=lambda: board.setup_mode("random_vs_random"))
     menubar.add_cascade(label="对弈模式", menu=mode_menu)
 
     file_menu = tk.Menu(menubar, tearoff=0)

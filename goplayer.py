@@ -12,6 +12,11 @@ from goruler import is_capture_move, is_valid_move, has_liberty
 class GoPlayer:
     def __init__(self, color):
         self.color = color  # 玩家的颜色 ('black' 或 'white')
+        self.move = None
+    # 把下棋的记录放在这里，
+    def my_move(self):
+        
+        return [self.move,self.color]
     # 抽象方法，子类需要实现具体的下棋逻辑。
     def make_move(self, board):
 
@@ -24,6 +29,10 @@ class HumanPlayer(GoPlayer):
         row = round((event.x - board.margin) / board.cell_size)
         col = round((event.y - board.margin) / board.cell_size)
         if board.place_stone(row, col, self.color):
+            self.move = (row, col)
+            self.my_move()
+            board.moves_history_store(row, col, self.color)  # 存储下棋记录
+
             return True
         return False
 
@@ -83,6 +92,9 @@ class AIPlayer(GoPlayer):
         
         row, col = move
         if board.place_stone(row, col, self.color):
+            self.move = (row, col)
+            self.my_move()
+            board.moves_history_store(row, col, self.color)  # 存储下棋记录
             return True
         return False
     def make_random_move(self, board, event=None):
@@ -173,6 +185,9 @@ class RandomPlayer(GoPlayer):
         if move is None:
             return False
         if board.place_stone(move[0], move[1], self.color):
+            self.move = move
+            self.my_move()
+            board.moves_history_store(move[0], move[1], self.color)  # 存储下棋记录
             return True
         return False
 

@@ -21,6 +21,7 @@ class GoBoard(tk.Frame):
         self.canvas.bind('<Configure>', self.draw_board)
         self.canvas.bind('<Button-1>', self.handle_click)
         self.canvas.pack(fill=tk.BOTH, expand=1)
+        self.moves_history = []  # 用于存储棋盘状态的历史记录{[row, col, color], ...}
         self.setup_players()
 
     # 根据棋盘大小设置贴目
@@ -237,15 +238,20 @@ class GoBoard(tk.Frame):
 
     # 悔棋功能
     def undo_move(self):
-        if self.grid:
-            last_move = self.grid.pop()
-            row, col = last_move
-            self.grid[row][col] = None
-            self.draw_board()
-            self.current_player = 'white' if self.current_player == 'black' else 'black'
-            print(f"Undo move: {last_move}")
-            print(f"Current player: {self.current_player}")
-            self.remove_captured_stones(self.current_player)
+        # last_move = self.grid.pop()
+        last_move = self.moves_history.pop()
+        row, col ,color = last_move
+        self.grid[row][col] = None
+        self.draw_board()
+        self.switch_player()
+        print(f"Undo move: {last_move}")
+        print(f"Current player: {self.current_player}")
+        self.remove_captured_stones(self.current_player)
+
+
+    def moves_history_store(self, row, col, color):
+        self.moves_history.append((row, col, color))
+
 
     # 提示功能
 

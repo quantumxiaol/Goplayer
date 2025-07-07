@@ -4,7 +4,7 @@ import copy
 import random
 import openai
 import os
-from readConfig import get_openai_config
+from dotenv import load_dotenv
 from goruler import is_capture_move, is_valid_move, has_liberty
 
 
@@ -74,7 +74,10 @@ class AIPlayer(GoPlayer):
     def __init__(self, color):
         super().__init__(color)
         # 初始化 OpenAI API 客户端
-        model, api_key, api_base = get_openai_config()
+        model=os.getenv("OPENAI_MODEL")
+        api_key=os.getenv("OPENAI_API_KEY")
+        api_base=os.getenv("OPENAI_BASE_URL")
+
         self.model = model
         self.client = openai.OpenAI(api_key=api_key, base_url=api_base)
         self.tourance=3  # 连续三次不合法的落子后，随机选择一个空位

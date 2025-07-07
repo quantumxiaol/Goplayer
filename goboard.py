@@ -4,7 +4,6 @@ import copy
 import random
 import openai
 import os
-from readConfig import get_openai_config
 from goplayer import HumanPlayer, AIPlayer,RandomPlayer
 
 class GoBoard(tk.Frame):

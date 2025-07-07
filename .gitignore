@@ -1,6 +1,7 @@
 __pycache__/
 
 config.yaml
+.env
 *.jpg
 
 # PyInstaller generated files and directories

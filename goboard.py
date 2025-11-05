@@ -40,10 +40,9 @@ class GoBoard(tk.Frame):
         重置棋盘状态。
         """
         self.grid = [[None for _ in range(self.size)] for _ in range(self.size)]
-        self.current_player = 'black'
         self.score = {'black': 0, 'white': 0}
         self.draw_board()
-        self.setup_players()  # 重新设置玩家
+        self.setup_players()  # 重新设置玩家（会设置 current_player）
     def draw_board(self, event=None):
         self.canvas.delete('all')
         self.margin = 25
@@ -205,19 +204,14 @@ class GoBoard(tk.Frame):
                         self.draw_board()
 
     def handle_click(self, event):
-        if isinstance(self.current_player, HumanPlayer):
         # 确保 event 不为 None
-            if event is None:
-                print("Error: Event is None in handle_click.")
-                return
-        if self.current_player.make_move(self, event):
-            self.switch_player()
+        if event is None:
+            print("Error: Event is None in handle_click.")
+            return
+        # 只有人类玩家才响应点击事件
         if isinstance(self.current_player, HumanPlayer):
             if self.current_player.make_move(self, event):
                 self.switch_player()
-        # if isinstance(self.current_player, RandomPlayer):
-        #     if self.current_player.make_move(self, event):
-        #         self.switch_player()
 
     def switch_player(self):
         """

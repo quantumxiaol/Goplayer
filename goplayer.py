@@ -73,6 +73,8 @@ def get_modfied_prompt(board_state, board,last_move,color="white"):
 class AIPlayer(GoPlayer):
     def __init__(self, color):
         super().__init__(color)
+        # 加载环境变量
+        load_dotenv()
         # 初始化 OpenAI API 客户端
         model=os.getenv("OPENAI_MODEL")
         api_key=os.getenv("OPENAI_API_KEY")
@@ -160,12 +162,14 @@ class AIPlayer(GoPlayer):
                     )
                     move_str = response.choices[0].message.content.strip()
                     row, col = map(int, move_str.split(","))
+                    move = (row, col)  # 更新move变量
                     isLegelMove = self.isLegelMove(board, row, col)
                 elif tourance<=0:
                     print("AI 玩家连续下棋位置不合法，随机选择一个空位")
-
-                    move=self.make_random_move(board, event=None)
-                    isLegelMove = self.isLegelMove(board, row, col)
+                    move = self.make_random_move(board, event=None)
+                    if move:
+                        row, col = move
+                        print(f"AI 随机选择位置：{row}, {col}")
                     break
             return move
         except Exception as e:

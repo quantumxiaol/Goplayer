@@ -4,7 +4,7 @@ import copy
 import random
 import openai
 import os
-from readConfig import get_openai_config
+
 from goboard import GoBoard
 from goplayer import HumanPlayer, AIPlayer
 

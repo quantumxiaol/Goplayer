@@ -17,6 +17,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 env.bak/
 venv.bak/
@@ -24,3 +25,5 @@ venv.bak/
 # Other common files to ignore
 *.log
 *.tmp
+
+uv.lock

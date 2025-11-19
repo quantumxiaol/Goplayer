@@ -17,6 +17,8 @@ class GoBoard(QWidget):
         self.margin = 25
         self.cell_size = 0
         self.moves_history = []  # 用于存储棋盘状态的历史记录{[row, col, color], ...}
+        self.consecutive_passes = 0  # 连续 pass 的次数（两个玩家都 pass 算一次）
+        self.game_over = False  # 游戏是否结束
         self.setMinimumSize(700, 700)
         self.setup_players()
 
@@ -39,6 +41,8 @@ class GoBoard(QWidget):
         self.grid = [[None for _ in range(self.size)] for _ in range(self.size)]
         self.score = {'black': 0, 'white': 0}
         self.moves_history = []
+        self.consecutive_passes = 0  # 重置 pass 计数
+        self.game_over = False  # 重置游戏状态
         self.update()  # 触发重绘
         self.setup_players()  # 重新设置玩家（会设置 current_player）
 
@@ -84,16 +88,36 @@ class GoBoard(QWidget):
                     self.draw_stone(painter, i, j, self.grid[i][j])
 
     def place_stone(self, row, col, color):
+        # 如果游戏已结束，不允许下棋
+        if self.game_over:
+            return False
+            
+        # 基本边界和位置检查
         if not (0 <= row < self.size and 0 <= col < self.size) or self.grid[row][col] is not None:
             return False
+        
+        # 保存旧棋盘状态，用于回滚
         old_grid = copy.deepcopy(self.grid)
+        
+        # 放置棋子
         self.grid[row][col] = color
         opponent_color = 'white' if color == 'black' else 'black'
+        
+        # 移除对方被吃的棋子（这一步可能会释放出新的气）
         self.remove_captured_stones(opponent_color)
-        if self.is_captured(self.flood_fill(row, col, color)):
+        
+        # 检查自己放置的棋子所在的连通块是否被吃
+        # 注意：在移除对方棋子后检查，因为吃掉对方可能会给自己带来气
+        my_group = self.flood_fill(row, col, color)
+        if self.is_captured(my_group):
+            # 如果自己的棋子被吃，回滚棋盘状态
             self.grid = old_grid
             self.update()
             return False
+        
+        # 走法合法，重置连续 pass 计数（因为成功下棋了）
+        self.consecutive_passes = 0
+        # 更新显示
         self.update()
         return True
 
@@ -115,6 +139,10 @@ class GoBoard(QWidget):
         self.current_player = self.players['black']  # 初始玩家为黑方
         print(f"Players initialized: {self.players}")
         print(f"Current player: {self.current_player}")
+        
+        # 如果是随机对弈模式，自动触发第一个玩家的下棋
+        if self.mode == "random_vs_random" and isinstance(self.current_player, RandomPlayer):
+            QTimer.singleShot(100, self.make_ai_move)
         
     # 设置对弈模式并重新初始化玩家
     def setup_mode(self, mode):
@@ -189,10 +217,14 @@ class GoBoard(QWidget):
         return True
 
     def remove_captured_stones(self, color):
+        visited = set()  # 用于避免重复处理同一个连通块
         for i in range(self.size):
             for j in range(self.size):
-                if self.grid[i][j] == color:
+                if self.grid[i][j] == color and (i, j) not in visited:
                     group = self.flood_fill(i, j, color)
+                    # 标记这个连通块的所有棋子为已访问
+                    for r, c in group:
+                        visited.add((r, c))
                     if self.is_captured(group):
                         for r, c in group:
                             self.grid[r][c] = None
@@ -223,8 +255,44 @@ class GoBoard(QWidget):
         """
         让 AI 玩家下棋。
         """
-        if self.current_player.make_move(self):
-            self.switch_player()
+        # 如果游戏已结束，不再下棋
+        if self.game_over:
+            return
+            
+        if isinstance(self.current_player, AIPlayer) or isinstance(self.current_player, RandomPlayer):
+            if self.current_player.make_move(self):
+                # 成功下棋，重置 pass 计数
+                self.consecutive_passes = 0
+                self.switch_player()
+            else:
+                # 如果下棋失败（比如没有合法走法），检查是否应该 pass
+                print(f"玩家 {self.current_player.color} 无法下棋，可能没有合法走法")
+                # 检查是否真的没有合法走法
+                has_legal_move = False
+                for r in range(self.size):
+                    for c in range(self.size):
+                        if self.grid[r][c] is None:
+                            from goruler import is_valid_move
+                            if is_valid_move(self, r, c, self.current_player.color):
+                                has_legal_move = True
+                                break
+                    if has_legal_move:
+                        break
+                
+                if not has_legal_move:
+                    # 真的没有合法走法，记录为 pass
+                    print(f"玩家 {self.current_player.color} 没有合法走法，pass")
+                    self.consecutive_passes += 1
+                    
+                    # 如果连续两次 pass（两个玩家都 pass），结束游戏
+                    if self.consecutive_passes >= 2:
+                        print("连续两次 pass，游戏结束")
+                        self.game_over = True
+                        # 自动判断胜负
+                        self.judge_winner()
+                    else:
+                        # 只有一次 pass，切换到对方玩家
+                        self.switch_player()
 
     # 悔棋功能
     def undo_move(self):

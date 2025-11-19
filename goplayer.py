@@ -203,14 +203,15 @@ class RandomPlayer(GoPlayer):
             (r, c) for r in range(board.size) for c in range(board.size) if board.grid[r][c] is None
         ]
         if not empty_positions:
-            return False
+            return None  # 返回 None 而不是 False，与 make_move 中的检查一致
         row, col = random.choice(empty_positions)
         is_legal_move = self.isLegelMove(board, row, col)
         while not is_legal_move:
             empty_positions.remove((row, col))
             if not empty_positions:
-                return False
+                return None  # 返回 None 而不是 False
             row, col = random.choice(empty_positions)
+            is_legal_move = self.isLegelMove(board, row, col)  # 重新检查新选择的走法
         move = (row, col)
         return move
     def isLegelMove(self, board, row, col):

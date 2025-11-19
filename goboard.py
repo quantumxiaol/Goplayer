@@ -1,13 +1,11 @@
-import tkinter as tk
-import tkinter.messagebox as messagebox
+from PyQt6.QtWidgets import QWidget, QMessageBox
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush
 import copy
-import random
-import openai
-import os
-from goplayer import HumanPlayer, AIPlayer,RandomPlayer
+from goplayer import HumanPlayer, AIPlayer, RandomPlayer
 
-class GoBoard(tk.Frame):
-    def __init__(self, parent, size=19):
+class GoBoard(QWidget):
+    def __init__(self, parent=None, size=19):
         super().__init__(parent)
         self.size = size
         self.reduce = self.komi()
@@ -16,11 +14,10 @@ class GoBoard(tk.Frame):
         self.players = {}  # 玩家字典 {'black': Player, 'white': Player}
         self.score = {'black': 0, 'white': 0}
         self.mode = "human_vs_human"  # 默认对弈模式
-        self.canvas = tk.Canvas(self, bg='peach puff')
-        self.canvas.bind('<Configure>', self.draw_board)
-        self.canvas.bind('<Button-1>', self.handle_click)
-        self.canvas.pack(fill=tk.BOTH, expand=1)
+        self.margin = 25
+        self.cell_size = 0
         self.moves_history = []  # 用于存储棋盘状态的历史记录{[row, col, color], ...}
+        self.setMinimumSize(700, 700)
         self.setup_players()
 
     # 根据棋盘大小设置贴目
@@ -41,70 +38,63 @@ class GoBoard(tk.Frame):
         """
         self.grid = [[None for _ in range(self.size)] for _ in range(self.size)]
         self.score = {'black': 0, 'white': 0}
-        self.draw_board()
+        self.moves_history = []
+        self.update()  # 触发重绘
         self.setup_players()  # 重新设置玩家（会设置 current_player）
-    def draw_board(self, event=None):
-        self.canvas.delete('all')
-        self.margin = 25
-        self.width, self.height = self.canvas.winfo_width(), self.canvas.winfo_height()
-        self.cell_size = (min(self.width, self.height) - 2 * self.margin) / (self.size - 1)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # 设置背景色
+        painter.fillRect(self.rect(), QColor(255, 218, 185))  # peach puff
+        
+        width = self.width()
+        height = self.height()
+        self.cell_size = (min(width, height) - 2 * self.margin) / (self.size - 1)
 
         # 加粗最外边框
-        border_width = 3  # 边框宽度
-        self.canvas.create_rectangle(
-            self.margin, self.margin,
-            self.width - self.margin, self.height - self.margin,
-            outline='black', width=border_width
+        border_width = 3
+        pen = QPen(QColor(0, 0, 0), border_width)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(
+            int(self.margin), int(self.margin),
+            int(width - 2 * self.margin), int(height - 2 * self.margin)
         )
 
         # 绘制网格线
-        for i in range(self.size ):  
-            x = i * self.cell_size + self.margin
-            y = i * self.cell_size + self.margin
+        pen = QPen(QColor(0, 0, 0), 1)
+        painter.setPen(pen)
+        for i in range(self.size):
+            x = int(i * self.cell_size + self.margin)
+            y = int(i * self.cell_size + self.margin)
             # 水平线
-            self.canvas.create_line(self.margin, y, self.width - self.margin, y, fill='black')
+            painter.drawLine(int(self.margin), y, int(width - self.margin), y)
             # 竖直线
-            self.canvas.create_line(x, self.margin, x, self.height - self.margin, fill='black')
+            painter.drawLine(x, int(self.margin), x, int(height - self.margin))
 
         # 绘制星位
-        self.draw_star_points()
+        self.draw_star_points(painter)
 
         # 绘制棋子
         for i in range(self.size):
             for j in range(self.size):
                 if self.grid[i][j] is not None:
-                    self.draw_stone(i, j, self.grid[i][j])
-    # def place_stone(self, event):
-    #     row = round((event.x - self.margin) / self.cell_size)
-    #     col = round((event.y - self.margin) / self.cell_size)
-    #     if 0 <= row < self.size and 0 <= col < self.size and self.grid[row][col] is None:
-    #         # 保留一个棋盘状态的副本
-    #         old_grid = copy.deepcopy(self.grid)
-    #         self.grid[row][col] = self.current_player
-    #         self.draw_stone(row, col, self.current_player)
-    #         self.remove_captured_stones('white' if self.current_player == 'black' else 'black')
-            
-    #         # 检查是否形成禁入点
-    #         if self.grid[row][col] is not None and self.is_captured(self.flood_fill(row, col, self.current_player)):
-    #             # 如果形成禁入点，恢复到先前的棋盘状态并阻止落子
-    #             self.grid = old_grid
-    #             self.draw_board()
-    #         else:
-    #             self.current_player = 'white' if self.current_player == 'black' else 'black'
-    #     print(self.score)
+                    self.draw_stone(painter, i, j, self.grid[i][j])
 
     def place_stone(self, row, col, color):
         if not (0 <= row < self.size and 0 <= col < self.size) or self.grid[row][col] is not None:
             return False
         old_grid = copy.deepcopy(self.grid)
         self.grid[row][col] = color
-        self.draw_stone(row, col, color)
         opponent_color = 'white' if color == 'black' else 'black'
         self.remove_captured_stones(opponent_color)
         if self.is_captured(self.flood_fill(row, col, color)):
             self.grid = old_grid
-            self.draw_board()
+            self.update()
             return False
+        self.update()
         return True
 
     def setup_players(self):
@@ -130,7 +120,8 @@ class GoBoard(tk.Frame):
     def setup_mode(self, mode):
         self.mode = mode
         self.reset() 
-    def draw_star_points(self):
+
+    def draw_star_points(self, painter):
         """
         在棋盘上绘制星位标记。
         """
@@ -150,20 +141,26 @@ class GoBoard(tk.Frame):
             return  # 其他尺寸棋盘不绘制星位
 
         # 绘制星位
+        brush = QBrush(QColor(0, 0, 0))
+        painter.setBrush(brush)
+        painter.setPen(Qt.PenStyle.NoPen)
         for row, col in star_points:
-            x = col * self.cell_size + self.margin
-            y = row * self.cell_size + self.margin
-            radius = self.cell_size / 10  # 星位半径
-            self.canvas.create_oval(
-                x - radius, y - radius, x + radius, y + radius,
-                fill='black'
-            )
+            x = int(col * self.cell_size + self.margin)
+            y = int(row * self.cell_size + self.margin)
+            radius = int(self.cell_size / 10)  # 星位半径
+            painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
 
-    def draw_stone(self, row, col, color):
-        x = row * self.cell_size + self.margin
-        y = col * self.cell_size + self.margin
-        radius = self.cell_size / 2
-        self.canvas.create_oval(x - radius, y - radius, x + radius, y + radius, fill=color)
+    def draw_stone(self, painter, row, col, color):
+        x = int(row * self.cell_size + self.margin)
+        y = int(col * self.cell_size + self.margin)
+        radius = int(self.cell_size / 2)
+        
+        stone_color = QColor(0, 0, 0) if color == 'black' else QColor(255, 255, 255)
+        brush = QBrush(stone_color)
+        painter.setBrush(brush)
+        pen = QPen(QColor(0, 0, 0), 1)
+        painter.setPen(pen)
+        painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
 
     def get_neighbors(self, row, col):
         neighbors = []
@@ -199,19 +196,19 @@ class GoBoard(tk.Frame):
                     if self.is_captured(group):
                         for r, c in group:
                             self.grid[r][c] = None
-                            # self.score[self.current_player] += 1
                             self.score[color] += 1
-                        self.draw_board()
+                        self.update()
 
-    def handle_click(self, event):
-        # 确保 event 不为 None
-        if event is None:
-            print("Error: Event is None in handle_click.")
-            return
-        # 只有人类玩家才响应点击事件
-        if isinstance(self.current_player, HumanPlayer):
-            if self.current_player.make_move(self, event):
-                self.switch_player()
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            # 确保 event 不为 None
+            if event is None:
+                print("Error: Event is None in mousePressEvent.")
+                return
+            # 只有人类玩家才响应点击事件
+            if isinstance(self.current_player, HumanPlayer):
+                if self.current_player.make_move(self, event):
+                    self.switch_player()
 
     def switch_player(self):
         """
@@ -219,8 +216,8 @@ class GoBoard(tk.Frame):
         """
         next_color = 'white' if self.current_player.color == 'black' else 'black'
         self.current_player = self.players[next_color]
-        if isinstance(self.current_player, AIPlayer):
-            self.after(100, self.make_ai_move)
+        if isinstance(self.current_player, AIPlayer) or isinstance(self.current_player, RandomPlayer):
+            QTimer.singleShot(100, self.make_ai_move)
 
     def make_ai_move(self):
         """
@@ -231,39 +228,35 @@ class GoBoard(tk.Frame):
 
     # 悔棋功能
     def undo_move(self):
-        # last_move = self.grid.pop()
+        if not self.moves_history:
+            QMessageBox.information(self, "提示", "没有可以悔棋的步骤")
+            return
         last_move = self.moves_history.pop()
-        row, col ,color = last_move
+        row, col, color = last_move
         self.grid[row][col] = None
-        self.draw_board()
+        self.update()
+        # 切换到上一步的玩家
         self.switch_player()
         print(f"Undo move: {last_move}")
         print(f"Current player: {self.current_player}")
-        self.remove_captured_stones(self.current_player)
-
 
     def moves_history_store(self, row, col, color):
         self.moves_history.append((row, col, color))
 
-
-    # 提示功能
-
-# 根据棋盘状态判断胜负，子多的获胜，其中黑子因为先手贴目要-7.5(19路)，白子不变
-# 判断胜负的并输出结果
+    # 根据棋盘状态判断胜负，子多的获胜，其中黑子因为先手贴目要-7.5(19路)，白子不变
+    # 判断胜负的并输出结果
     def judge_winner(self):
-
-        black_score = sum(row.count('black') for row in self.grid)- self.reduce
+        black_score = sum(row.count('black') for row in self.grid) - self.reduce
         white_score = sum(row.count('white') for row in self.grid)
         
         if black_score > white_score:
-            result= 'black'
+            result = 'black'
         elif white_score >= black_score:
-            result= 'white'
+            result = 'white'
         # 输出结果
         print(f"黑子得分：{black_score}，白子得分：{white_score}")
         print(f"胜者：{result}")
 
-        messagebox.showinfo("比赛结果", f"黑子得分：{black_score}，白子得分：{white_score}\n胜者：{result}")
-        # messagebox.showinfo("比赛结果", result)
+        QMessageBox.information(self, "比赛结果", f"黑子得分：{black_score}，白子得分：{white_score}\n胜者：{result}")
 
         return result

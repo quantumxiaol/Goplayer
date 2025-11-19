@@ -1,2 +1,3 @@
 openai
 python-dotenv
+PyQt6>=6.6.0

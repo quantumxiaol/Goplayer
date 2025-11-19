@@ -4,6 +4,8 @@ config.yaml
 .env
 *.jpg
 
+.DS_Store
+
 # PyInstaller generated files and directories
 /dist/
 /build/

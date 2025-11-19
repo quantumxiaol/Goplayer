@@ -1,5 +1,3 @@
-import tkinter as tk
-import tkinter.messagebox as messagebox
 import copy
 import random
 import openai
@@ -26,8 +24,10 @@ class HumanPlayer(GoPlayer):
     def make_move(self, board, event=None):
         if event is None:
             return False
-        row = round((event.x - board.margin) / board.cell_size)
-        col = round((event.y - board.margin) / board.cell_size)
+        # PyQt6 事件使用 pos() 方法获取坐标
+        pos = event.pos()
+        row = round((pos.x() - board.margin) / board.cell_size)
+        col = round((pos.y() - board.margin) / board.cell_size)
         if board.place_stone(row, col, self.color):
             self.move = (row, col)
             self.my_move()

@@ -1,9 +1,8 @@
-import copy
 import random
 import openai
 import os
 from dotenv import load_dotenv
-from goruler import is_capture_move, is_valid_move, has_liberty
+from goruler import is_valid_move
 
 
 # AI棋手或人类棋手的抽象类
@@ -31,7 +30,6 @@ class HumanPlayer(GoPlayer):
         if board.place_stone(row, col, self.color):
             self.move = (row, col)
             self.my_move()
-            board.moves_history_store(row, col, self.color)  # 存储下棋记录
 
             return True
         return False
@@ -99,7 +97,6 @@ class AIPlayer(GoPlayer):
         if board.place_stone(row, col, self.color):
             self.move = (row, col)
             self.my_move()
-            board.moves_history_store(row, col, self.color)  # 存储下棋记录
             return True
         return False
     def make_random_move(self, board, event=None):
@@ -194,7 +191,6 @@ class RandomPlayer(GoPlayer):
         if board.place_stone(move[0], move[1], self.color):
             self.move = move
             self.my_move()
-            board.moves_history_store(move[0], move[1], self.color)  # 存储下棋记录
             return True
         return False
 

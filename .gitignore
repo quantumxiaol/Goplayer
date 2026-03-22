@@ -28,4 +28,6 @@ venv.bak/
 *.log
 *.tmp
 
+checkpoints/
+
 uv.lock

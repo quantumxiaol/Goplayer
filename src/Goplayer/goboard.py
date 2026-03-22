@@ -4,8 +4,8 @@ from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QBrush, QColor, QPainter, QPen
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
-from goenv import GoEnv
-from goplayer import AIPlayer, HumanPlayer, RandomPlayer
+from .goenv import GoEnv
+from .goplayer import AIPlayer, HumanPlayer, RandomPlayer
 
 
 class BoardSnapshot:

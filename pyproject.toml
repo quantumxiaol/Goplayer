@@ -9,3 +9,11 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "PyQt6>=6.6.0",
 ]
+[tool.uv]
+package = true
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

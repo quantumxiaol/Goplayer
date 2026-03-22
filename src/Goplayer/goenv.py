@@ -1,4 +1,4 @@
-from goruler import serialize_grid, is_valid_move
+from .goruler import serialize_grid, is_valid_move
 
 
 class GoEnv:

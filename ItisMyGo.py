@@ -1,6 +1,15 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow, QMenuBar, QMenu
-from goboard import GoBoard
+from pathlib import Path
+
+from PyQt6.QtWidgets import QApplication, QMainWindow
+
+# 允许 `python ItisMyGo.py` 直接从项目根目录启动
+ROOT = Path(__file__).resolve().parent
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from Goplayer.goboard import GoBoard
 
 
 if __name__ == "__main__":

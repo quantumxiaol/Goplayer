@@ -4,7 +4,7 @@ from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QBrush, QColor, QPainter, QPen
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
-from goruler import is_valid_move, serialize_grid
+from goenv import GoEnv
 from goplayer import AIPlayer, HumanPlayer, RandomPlayer
 
 
@@ -36,40 +36,66 @@ class AIMoveWorker(QObject):
 class GoBoard(QWidget):
     def __init__(self, parent=None, size=19):
         super().__init__(parent)
-        self.size = size
-        self.reduce = self.komi()
-        self.grid = [[None for _ in range(size)] for _ in range(size)]
+        self.env = GoEnv(size=size)
+        self.size = self.env.size
         self.current_player = None
         self.players = {}
-        self.score = {"black": 0, "white": 0}
         self.mode = "human_vs_human"
         self.margin = 25
         self.cell_size = 0
-        self.moves_history = []
-        self.undo_stack = []
-        self.position_history = {self.board_signature()}
-        self.consecutive_passes = 0
-        self.game_over = False
         self.ai_thread = None
         self.ai_worker = None
         self.ai_thinking = False
         self.setMinimumSize(700, 700)
         self.setup_players()
 
-    # 根据棋盘大小设置贴目
-    def komi(self):
-        if self.size == 19:
-            komi = 7.5
-        elif self.size == 13:
-            komi = 2.0
-        elif self.size == 9:
-            komi = 5.5
-        else:
-            komi = 0.0
-        return komi
+    # 兼容旧调用：将环境状态暴露为 Board 属性
+    @property
+    def grid(self):
+        return self.env.grid
+
+    @grid.setter
+    def grid(self, value):
+        self.env.grid = value
+
+    @property
+    def position_history(self):
+        return self.env.position_history
+
+    @position_history.setter
+    def position_history(self, value):
+        self.env.position_history = value
+
+    @property
+    def moves_history(self):
+        return self.env.moves_history
+
+    @property
+    def consecutive_passes(self):
+        return self.env.consecutive_passes
+
+    @consecutive_passes.setter
+    def consecutive_passes(self, value):
+        self.env.consecutive_passes = value
+
+    @property
+    def game_over(self):
+        return self.env.game_over
+
+    @game_over.setter
+    def game_over(self, value):
+        self.env.game_over = value
+
+    @property
+    def score(self):
+        return self.env.captures
+
+    @score.setter
+    def score(self, value):
+        self.env.captures = value
 
     def board_signature(self, grid=None):
-        return serialize_grid(self.grid if grid is None else grid)
+        return self.env.board_signature(grid)
 
     def _stop_ai_worker(self):
         self.ai_thinking = False
@@ -85,28 +111,20 @@ class GoBoard(QWidget):
 
     def reset(self):
         self._stop_ai_worker()
-        self.grid = [[None for _ in range(self.size)] for _ in range(self.size)]
-        self.score = {"black": 0, "white": 0}
-        self.moves_history = []
-        self.undo_stack = []
-        self.position_history = {self.board_signature()}
-        self.consecutive_passes = 0
-        self.game_over = False
+        self.env.reset()
         self.update()
         self.setup_players()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        painter.fillRect(self.rect(), QColor(255, 218, 185))  # peach puff
+        painter.fillRect(self.rect(), QColor(255, 218, 185))
 
         width = self.width()
         height = self.height()
         self.cell_size = (min(width, height) - 2 * self.margin) / (self.size - 1)
 
-        border_width = 3
-        pen = QPen(QColor(0, 0, 0), border_width)
+        pen = QPen(QColor(0, 0, 0), 3)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(
@@ -125,7 +143,6 @@ class GoBoard(QWidget):
             painter.drawLine(x, int(self.margin), x, int(height - self.margin))
 
         self.draw_star_points(painter)
-
         for i in range(self.size):
             for j in range(self.size):
                 if self.grid[i][j] is not None:
@@ -135,59 +152,18 @@ class GoBoard(QWidget):
         self.draw_turn_indicator(painter)
 
     def place_stone(self, row, col, color):
-        if self.game_over:
-            return False
-        if not (0 <= row < self.size and 0 <= col < self.size):
-            return False
-        if self.grid[row][col] is not None:
-            return False
-
-        old_grid = [line[:] for line in self.grid]
-        old_score = self.score.copy()
-        old_history = set(self.position_history)
-        old_consecutive_passes = self.consecutive_passes
-        old_game_over = self.game_over
-
-        self.grid[row][col] = color
-        opponent_color = "white" if color == "black" else "black"
-        self.remove_captured_stones_around(row, col, opponent_color)
-
-        _, liberties = self.get_group_and_liberties(row, col)
-        if not liberties:
-            self.grid = old_grid
-            self.score = old_score
-            return False
-
-        next_signature = self.board_signature()
-        if next_signature in self.position_history:
-            self.grid = old_grid
-            self.score = old_score
-            return False
-
-        self.undo_stack.append(
-            {
-                "grid": old_grid,
-                "score": old_score,
-                "position_history": old_history,
-                "consecutive_passes": old_consecutive_passes,
-                "game_over": old_game_over,
-            }
-        )
-        self.position_history.add(next_signature)
-        self.moves_history.append((row, col, color))
-        self.consecutive_passes = 0
-        self.update()
-        return True
+        placed = self.env.place_stone(row, col, color)
+        if placed:
+            self.update()
+        return placed
 
     def setup_players(self):
         if self.mode == "human_vs_human":
             self.players["black"] = HumanPlayer("black")
             self.players["white"] = HumanPlayer("white")
         elif self.mode == "human_vs_ai":
-            human_color = "black"
-            ai_color = "white"
-            self.players[human_color] = HumanPlayer(human_color)
-            self.players[ai_color] = AIPlayer(ai_color)
+            self.players["black"] = HumanPlayer("black")
+            self.players["white"] = AIPlayer("white")
         elif self.mode == "random_vs_random":
             self.players["black"] = RandomPlayer("black")
             self.players["white"] = RandomPlayer("white")
@@ -198,7 +174,6 @@ class GoBoard(QWidget):
         if self.mode == "random_vs_random" and isinstance(self.current_player, RandomPlayer):
             QTimer.singleShot(100, self.make_ai_move)
 
-    # 设置对弈模式并重新初始化玩家
     def setup_mode(self, mode):
         self.mode = mode
         self.reset()
@@ -243,8 +218,7 @@ class GoBoard(QWidget):
         else:
             return
 
-        brush = QBrush(QColor(0, 0, 0))
-        painter.setBrush(brush)
+        painter.setBrush(QBrush(QColor(0, 0, 0)))
         painter.setPen(Qt.PenStyle.NoPen)
         for row, col in star_points:
             x = int(col * self.cell_size + self.margin)
@@ -256,12 +230,9 @@ class GoBoard(QWidget):
         x = int(row * self.cell_size + self.margin)
         y = int(col * self.cell_size + self.margin)
         radius = int(self.cell_size / 2)
-
         stone_color = QColor(0, 0, 0) if color == "black" else QColor(255, 255, 255)
-        brush = QBrush(stone_color)
-        painter.setBrush(brush)
-        pen = QPen(QColor(0, 0, 0), 1)
-        painter.setPen(pen)
+        painter.setBrush(QBrush(stone_color))
+        painter.setPen(QPen(QColor(0, 0, 0), 1))
         painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
 
     def draw_last_move_marker(self, painter):
@@ -288,57 +259,6 @@ class GoBoard(QWidget):
         painter.setFont(font)
         painter.drawText(int(self.margin), int(self.margin - 8), text)
 
-    def get_neighbors(self, row, col):
-        neighbors = []
-        if row > 0:
-            neighbors.append((row - 1, col))
-        if col > 0:
-            neighbors.append((row, col - 1))
-        if row < self.size - 1:
-            neighbors.append((row + 1, col))
-        if col < self.size - 1:
-            neighbors.append((row, col + 1))
-        return neighbors
-
-    def get_group_and_liberties(self, row, col):
-        color = self.grid[row][col]
-        if color is None:
-            return set(), set()
-
-        group = set()
-        liberties = set()
-        stack = [(row, col)]
-        while stack:
-            r, c = stack.pop()
-            if (r, c) in group:
-                continue
-            group.add((r, c))
-            for nr, nc in self.get_neighbors(r, c):
-                stone = self.grid[nr][nc]
-                if stone is None:
-                    liberties.add((nr, nc))
-                elif stone == color and (nr, nc) not in group:
-                    stack.append((nr, nc))
-        return group, liberties
-
-    def remove_captured_stones_around(self, row, col, color):
-        checked = set()
-        captured_count = 0
-        for nr, nc in self.get_neighbors(row, col):
-            if self.grid[nr][nc] != color or (nr, nc) in checked:
-                continue
-            group, liberties = self.get_group_and_liberties(nr, nc)
-            checked.update(group)
-            if liberties:
-                continue
-            for gr, gc in group:
-                self.grid[gr][gc] = None
-            captured_count += len(group)
-
-        if captured_count > 0:
-            self.score[color] += captured_count
-        return captured_count
-
     def mousePressEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
             return
@@ -356,21 +276,15 @@ class GoBoard(QWidget):
             QTimer.singleShot(100, self.make_ai_move)
 
     def _all_legal_moves(self, color):
-        legal_moves = []
-        for r in range(self.size):
-            for c in range(self.size):
-                if self.grid[r][c] is None and is_valid_move(self, r, c, color):
-                    legal_moves.append((r, c))
-        return legal_moves
+        return self.env.legal_moves(color)
 
     def _register_pass(self):
         if self.game_over:
             return
-        self.consecutive_passes += 1
-        print(f"玩家 {self.current_player.color} pass（连续pass={self.consecutive_passes}）")
-        if self.consecutive_passes >= 2:
+        count, ended = self.env.register_pass()
+        print(f"玩家 {self.current_player.color} pass（连续pass={count}）")
+        if ended:
             print("连续两次 pass，游戏结束")
-            self.game_over = True
             self.judge_winner()
             return
         self.switch_player()
@@ -443,95 +357,38 @@ class GoBoard(QWidget):
                     print(
                         f"玩家 {self.current_player.color} 落子 {self.current_player.move}，已打断连续pass"
                     )
-                self.consecutive_passes = 0
                 self.switch_player()
                 return
             self._register_pass()
 
-    # 悔棋功能
     def undo_move(self):
-        if not self.undo_stack or not self.moves_history:
+        undone_move = self.env.undo()
+        if undone_move is None:
             QMessageBox.information(self, "提示", "没有可以悔棋的步骤")
             return
-
         self._stop_ai_worker()
-        last_move = self.moves_history.pop()
-        snapshot = self.undo_stack.pop()
-        self.grid = snapshot["grid"]
-        self.score = snapshot["score"]
-        self.position_history = snapshot["position_history"]
-        self.consecutive_passes = snapshot["consecutive_passes"]
-        self.game_over = snapshot["game_over"]
-        self.current_player = self.players[last_move[2]]
+        self.current_player = self.players[undone_move[2]]
         self.update()
 
-    # 兼容旧接口，避免历史调用报错
+    # 兼容旧接口
     def moves_history_store(self, row, col, color):
-        if not self.moves_history or self.moves_history[-1] != (row, col, color):
-            self.moves_history.append((row, col, color))
-
-    def _explore_empty_region(self, row, col, visited):
-        stack = [(row, col)]
-        region = set()
-        border_colors = set()
-
-        while stack:
-            r, c = stack.pop()
-            if (r, c) in visited:
-                continue
-            visited.add((r, c))
-            if self.grid[r][c] is not None:
-                continue
-            region.add((r, c))
-
-            for nr, nc in self.get_neighbors(r, c):
-                stone = self.grid[nr][nc]
-                if stone is None and (nr, nc) not in visited:
-                    stack.append((nr, nc))
-                elif stone in ("black", "white"):
-                    border_colors.add(stone)
-        return region, border_colors
+        return
 
     def calculate_area_score(self):
-        black_stones = sum(row.count("black") for row in self.grid)
-        white_stones = sum(row.count("white") for row in self.grid)
-        black_territory = 0
-        white_territory = 0
+        return self.env.calculate_area_score()
 
-        visited = set()
-        for r in range(self.size):
-            for c in range(self.size):
-                if self.grid[r][c] is None and (r, c) not in visited:
-                    region, border_colors = self._explore_empty_region(r, c, visited)
-                    if len(border_colors) == 1:
-                        owner = next(iter(border_colors))
-                        if owner == "black":
-                            black_territory += len(region)
-                        elif owner == "white":
-                            white_territory += len(region)
-
-        black_score = float(black_stones + black_territory)
-        white_score = float(white_stones + white_territory + self.reduce)
-        return black_score, white_score
-
-    # 根据棋盘状态判断胜负（面积计分：棋子 + 地盘，白方加贴目）
     def judge_winner(self):
-        # 统一将“判断胜负”视作终局动作，避免终局后继续调度随机/AI落子
-        self.game_over = True
         self._stop_ai_worker()
-
-        black_score, white_score = self.calculate_area_score()
-
-        if black_score > white_score:
-            result = "black"
-        else:
-            result = "white"
+        result = self.env.judge_winner()
+        black_score = result["black_score"]
+        white_score = result["white_score"]
+        winner = result["winner"]
 
         print(f"黑子得分：{black_score:.1f}，白子得分：{white_score:.1f}")
-        print(f"胜者：{result}")
+        print(f"胜者：{winner}")
         QMessageBox.information(
             self,
             "比赛结果",
-            f"黑子得分：{black_score:.1f}，白子得分：{white_score:.1f}\n胜者：{result}",
+            f"黑子得分：{black_score:.1f}，白子得分：{white_score:.1f}\n胜者：{winner}",
         )
-        return result
+        return winner

@@ -78,12 +78,14 @@ class MCTS:
             value_scalar = float(value.item())
         return policy, value_scalar
 
-    def _legal_actions(self, env, current_color: str):
+    def _legal_actions(self, env, current_color: str, allow_pass: bool = True):
         legal_moves = env.legal_moves(current_color)
-        return legal_moves + [PASS_MOVE]
+        if allow_pass or not legal_moves:
+            return legal_moves + [PASS_MOVE]
+        return legal_moves
 
-    def _expand(self, node: MCTSNode, env, current_color: str, device):
-        legal_actions = self._legal_actions(env, current_color)
+    def _expand(self, node: MCTSNode, env, current_color: str, device, allow_pass: bool = True):
+        legal_actions = self._legal_actions(env, current_color, allow_pass=allow_pass)
         policy, value = self._evaluate_policy_value(env, current_color, device)
 
         action_size = env.size * env.size + 1
@@ -138,7 +140,14 @@ class MCTS:
             node.value_sum += value
             value = -value
 
-    def get_action_probs(self, root_env, current_color: str, temperature: float = 1.0, device="cpu"):
+    def get_action_probs(
+        self,
+        root_env,
+        current_color: str,
+        temperature: float = 1.0,
+        device="cpu",
+        allow_pass: bool = True,
+    ):
         root = MCTSNode()
 
         for _ in range(self.num_simulations):
@@ -161,7 +170,7 @@ class MCTS:
             if env.game_over:
                 leaf_value = self._terminal_value(env, player)
             else:
-                leaf_value = self._expand(node, env, player, device)
+                leaf_value = self._expand(node, env, player, device, allow_pass=allow_pass)
             self._backpropagate(search_path, leaf_value)
 
         action_size = root_env.size * root_env.size + 1
@@ -208,8 +217,15 @@ class MCTS:
         temperature: float = 1.0,
         device="cpu",
         deterministic: bool = True,
+        allow_pass: bool = True,
     ):
-        probs = self.get_action_probs(root_env, current_color, temperature=temperature, device=device)
+        probs = self.get_action_probs(
+            root_env,
+            current_color,
+            temperature=temperature,
+            device=device,
+            allow_pass=allow_pass,
+        )
         if deterministic:
             idx = int(np.argmax(probs))
         else:

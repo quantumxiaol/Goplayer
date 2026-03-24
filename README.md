@@ -96,7 +96,9 @@ RL_DEVICE=auto
 RL_CHECKPOINT_DIR=checkpoints
 RL_LOG_DIR=logs
 RL_TENSORBOARD=0
+RL_MIN_MOVES_BEFORE_PASS=30
 ALPHAZERO_CHECKPOINT_PATH=checkpoints/best_model.pth
+ALPHAZERO_MIN_MOVES_BEFORE_PASS=18
 ```
 
 说明：
@@ -104,6 +106,8 @@ ALPHAZERO_CHECKPOINT_PATH=checkpoints/best_model.pth
 - `RL_DEVICE` 支持 `auto / cpu / cuda / mps`
 - 命令行参数优先级高于 `.env`
 - `ALPHAZERO_CHECKPOINT_PATH` 用于 GUI 的「挑战 AlphaZero」模式加载权重
+- `RL_MIN_MOVES_BEFORE_PASS`：训练时前 N 手不允许 pass（除非无合法落子），减少“白方吃komi+早早双pass”塌缩
+- `ALPHAZERO_MIN_MOVES_BEFORE_PASS`：GUI 对弈时前 N 手不允许 pass（除非无合法落子）
 - `AlphaZero` 模式会检查 checkpoint 与当前棋盘大小是否匹配（不匹配会拒绝加载并回退）
 
 ## 5. 棋盘大小与模型关系

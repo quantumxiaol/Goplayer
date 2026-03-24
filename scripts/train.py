@@ -41,6 +41,7 @@ from rl.utils import ensure_checkpoint_dir, resolve_device, save_checkpoint
 class Trainer:
     def __init__(self, args):
         self.args = args
+        self.args.min_moves_before_pass = max(0, int(self.args.min_moves_before_pass))
         self.device = resolve_device(args.device)
         self.checkpoint_dir = ensure_checkpoint_dir(args.checkpoint_dir)
         self.log_dir = ensure_checkpoint_dir(args.log_dir)
@@ -123,11 +124,24 @@ class Trainer:
         while not env.game_over and move_count < self.args.max_moves:
             state = encode_state(env, current_color)
             temperature = 1.0 if move_count < self.args.temperature_moves else 1e-3
-            action_probs = mcts.get_action_probs(env, current_color, temperature=temperature, device=self.device)
+            legal_moves = env.legal_moves(current_color)
+            allow_pass = bool(legal_moves) and move_count >= self.args.min_moves_before_pass
+            if not legal_moves:
+                allow_pass = True
+            action_probs = mcts.get_action_probs(
+                env,
+                current_color,
+                temperature=temperature,
+                device=self.device,
+                allow_pass=allow_pass,
+            )
             action_index = int(np.random.choice(len(action_probs), p=action_probs))
             action = index_to_action(action_index, env.size)
 
             game_history.append((state, action_probs, current_color))
+
+            if action == PASS_MOVE and not allow_pass and legal_moves:
+                action = random.choice(legal_moves)
 
             if action == PASS_MOVE:
                 env.register_pass()
@@ -192,6 +206,7 @@ def parse_args():
     env_checkpoint_dir = os.getenv("RL_CHECKPOINT_DIR")
     env_log_dir = os.getenv("RL_LOG_DIR")
     env_tensorboard = _env_bool("RL_TENSORBOARD", False)
+    env_min_moves_before_pass = _env_int("RL_MIN_MOVES_BEFORE_PASS", 30)
 
     parser = argparse.ArgumentParser(description="AlphaZero-like self-play training for Goplayer")
     parser.add_argument("--board-size", type=int, default=9)
@@ -207,6 +222,12 @@ def parse_args():
     parser.add_argument("--res-blocks", type=int, default=3)
     parser.add_argument("--temperature-moves", type=int, default=20)
     parser.add_argument("--max-moves", type=int, default=400)
+    parser.add_argument(
+        "--min-moves-before-pass",
+        type=int,
+        default=env_min_moves_before_pass,
+        help="Disallow pass before this many plies in self-play (unless no legal moves).",
+    )
     parser.add_argument("--save-interval", type=int, default=10)
     parser.add_argument("--device", type=str, default=env_device)
     parser.add_argument(
@@ -234,6 +255,16 @@ def _env_bool(key: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(key: str, default: int) -> int:
+    raw = os.getenv(key)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
 
 
 def main():

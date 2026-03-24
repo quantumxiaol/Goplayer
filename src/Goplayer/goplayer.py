@@ -183,6 +183,13 @@ class AlphaZeroPlayer(GoPlayer):
         load_dotenv()
         default_checkpoint = os.getenv("ALPHAZERO_CHECKPOINT_PATH", "checkpoints/best_model.pth")
         self.checkpoint_path = Path(checkpoint_path or default_checkpoint)
+        raw_min_moves = os.getenv("ALPHAZERO_MIN_MOVES_BEFORE_PASS")
+        self.min_moves_before_pass = None
+        if raw_min_moves is not None and raw_min_moves.strip():
+            try:
+                self.min_moves_before_pass = max(0, int(raw_min_moves.strip()))
+            except ValueError:
+                self.min_moves_before_pass = None
         self.num_simulations = num_simulations
         self.c_puct = c_puct
         self.device = None
@@ -285,13 +292,27 @@ class AlphaZeroPlayer(GoPlayer):
                 return True
             return False
 
+        legal_moves = board.env.legal_moves(self.color)
+        min_moves_before_pass = (
+            self.min_moves_before_pass
+            if self.min_moves_before_pass is not None
+            else max(0, board.size * 2)
+        )
+        allow_pass = bool(legal_moves) and len(board.moves_history) >= min_moves_before_pass
+        if not legal_moves:
+            allow_pass = True
+
         action = self.mcts.get_action(
             board.env,
             self.color,
             temperature=1e-6,
             device=self.device,
             deterministic=True,
+            allow_pass=allow_pass,
         )
+
+        if action == (-1, -1) and not allow_pass and legal_moves:
+            action = random.choice(legal_moves)
 
         if action == (-1, -1):
             return False

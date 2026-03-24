@@ -1,53 +1,124 @@
 # Goplayer
-一个python写的简单的围棋程序，使用Tkinter库
+一个基于 **PyQt6** 的围棋程序，支持：
 
-# 说明
-这个项目是我大学入坑围棋时心血来潮写的，当时还有个用到Tkinter的作业，
-但是写到吃子的洪水算法后就没再走下去，
-我自己的围棋水平刚刚能比较容易的下赢棋弈无限的10K AI，
-现在提前进组工作，用到Agent的知识，需要学习，
-所以~~在摸鱼时~~加功能，用GPT去下棋，学习Agent的部署
-~~Agent不用LLM输出，它会自己Call KataGo的tool来帮自己下棋~~
+- GUI 对弈（人人 / 人机 / 随机 / 挑战本地 AlphaZero）
+- 9/13/19 路棋盘切换
+- 基于 `GoEnv` 的 AlphaZero 风格自博弈训练
 
-人机对战只是用来练习调用LLM API的，实际下棋不应该和GPT下，肯定下不过KataGo
+# 普通用户：GUI 下棋
 
-~~都用KataGo还用Tkinter写的抽象围棋做什么~~
+## 1. 安装（仅 GUI）
 
-# 任务
+```bash
+uv sync --extra gui
+```
 
-- [x] 创建棋盘
-- [x] 吃子
-- [x] 判断输赢
-- [x] 悔棋
-- [x] 双人对弈
-- [ ] 接入OpenAI 使用GPT对弈
-  - [x] 使用openai对弈
-  - [ ] 使用langchain结构化输出
-  - [x] 异常处理，无效点重新生成
-- [x] 随机对弈(随机数大战)
-- [ ] 胜负判断
-  - [x] 下到终局下无可下时数子判断
-  - [ ] 势力估计(这个比较难，估计做不出来) 
-- [x] 特殊规则
-  - [x] 打劫（全局同形禁现，Positional Superko）  
-  - [x] 禁入点（自杀规则，Suicide Rule） 
-  - [x] 终局（双 Pass，Game Over） 
-  - [x] 贴目（Komi） 
-- [ ] RL训练框架支持
-  - [x] 分离UI界面与ENV，解耦合
-  - [ ] 训练代码
+如果你要玩「人机对弈（OpenAI API）」模式，再配置 `.env`（可参考 `.env.template`）：
 
-# 界面
-<!-- [游戏界面](./png/interface.png) -->
-<img src="./png/interface.png" alt="游戏界面" style="zoom:50%;" />
+```bash
+OPENAI_MODEL="your-model"
+OPENAI_API_KEY="your-key"
+OPENAI_BASE_URL="your-base-url"
+```
 
-# 运行
-python ItisMyGo.py
+## 2. 启动 GUI
 
-~~Go批是吧~~
+```bash
+uv run python ItisMyGo.py
+```
 
-# 输赢判断
+## 3. 在界面里怎么用
 
-Tromp-Taylor 规则，子数 + 完全被单一方包围的空交叉点，然后白方加上贴目 (Komi)。
+- `对弈模式`
+- `人人对弈`：双人本地落子
+- `人机对弈`：调用 OpenAI API 的 AI
+- `挑战 AlphaZero`：加载本地训练权重对弈
+- `随机对弈`：双方随机落子
 
-# [围棋入门规则](GoRules.md)
+- `棋盘大小`
+- `9路 / 13路 / 19路` 可随时切换
+
+- `选项`
+- `新游戏 / 判断胜负 / 悔棋`
+
+# 强化学习训练（AlphaZero 风格）
+
+## 1. 安装训练依赖
+
+仅训练（无 GUI）：
+
+```bash
+uv sync --extra rl
+```
+
+完整环境（GUI + RL）：
+
+```bash
+uv sync --extra all
+# 或
+uv sync --extra gui --extra rl
+# 或
+uv sync --all-extras
+```
+
+## 2. 开始训练
+
+示例（9 路）：
+
+```bash
+uv run python scripts/train.py --board-size 9 --iterations 200
+```
+
+快速冒烟（先确认流程能跑通）：
+
+```bash
+uv run python scripts/train.py --board-size 9 --iterations 5 --games-per-iteration 2 --train-steps-per-iteration 2
+```
+
+## 3. 训练输出
+
+- 模型权重默认保存到 `checkpoints/`
+- 训练日志默认保存到 `logs/`
+- `logs/train_metrics.csv`：每轮指标
+- `logs/events.out.tfevents.*`：TensorBoard 事件（启用后）
+
+TensorBoard 查看：
+
+```bash
+uv run tensorboard --logdir logs
+```
+
+## 4. 训练配置（`.env`）
+
+```bash
+RL_DEVICE=auto
+RL_CHECKPOINT_DIR=checkpoints
+RL_LOG_DIR=logs
+RL_TENSORBOARD=0
+ALPHAZERO_CHECKPOINT_PATH=checkpoints/best_model.pth
+```
+
+说明：
+
+- `RL_DEVICE` 支持 `auto / cpu / cuda / mps`
+- 命令行参数优先级高于 `.env`
+- `ALPHAZERO_CHECKPOINT_PATH` 用于 GUI 的「挑战 AlphaZero」模式加载权重
+
+## 5. 棋盘大小与模型关系
+
+不同棋盘大小需要分别训练并分别保存模型。
+
+建议命名：
+
+- `checkpoints/best_model_9.pth`
+- `checkpoints/best_model_13.pth`
+- `checkpoints/best_model_19.pth`
+
+# 规则说明
+
+- 终局：双 Pass
+- 禁入点：Suicide Rule
+- 打劫：Positional Superko
+- 计分：Tromp-Taylor（白方含贴目 Komi）
+
+更多规则见：[GoRules.md](GoRules.md)

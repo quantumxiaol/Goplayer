@@ -7,10 +7,29 @@ requires-python = ">=3.12"
 dependencies = [
     "openai>=2.7.1",
     "python-dotenv>=1.2.1",
-    "PyQt6>=6.6.0",
 ]
 [tool.uv]
 package = true
+
+[project.optional-dependencies]
+gui = [
+    "PyQt6>=6.6.0",
+]
+
+rl = [
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "tqdm>=4.65.0",
+    "tensorboard>=2.14.0",
+]
+
+all = [
+    "PyQt6>=6.6.0",
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "tqdm>=4.65.0",
+    "tensorboard>=2.14.0",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

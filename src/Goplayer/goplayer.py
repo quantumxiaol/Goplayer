@@ -1,10 +1,16 @@
 import os
 import random
+from pathlib import Path
 
 import openai
 from dotenv import load_dotenv
 
 from .goruler import is_valid_move
+
+try:
+    import torch
+except ImportError:  # pragma: no cover - optional dependency
+    torch = None
 
 
 class GoPlayer:
@@ -157,6 +163,110 @@ class AIPlayer(GoPlayer):
 
     def isLegelMove(self, board, row, col):
         return is_valid_move(board, row, col, self.color)
+
+
+class AlphaZeroPlayer(GoPlayer):
+    """
+    Local AlphaZero-style player.
+    Falls back to random legal moves when RL dependencies/checkpoint are unavailable.
+    """
+
+    def __init__(
+        self,
+        color,
+        checkpoint_path=None,
+        num_simulations=160,
+        c_puct=1.5,
+    ):
+        super().__init__(color)
+        load_dotenv()
+        default_checkpoint = os.getenv("ALPHAZERO_CHECKPOINT_PATH", "checkpoints/best_model.pth")
+        self.checkpoint_path = Path(checkpoint_path or default_checkpoint)
+        self.num_simulations = num_simulations
+        self.c_puct = c_puct
+        self.device = None
+        self.model = None
+        self.mcts = None
+        self._init_error = None
+
+    def _ensure_initialized(self, board):
+        if self.mcts is not None:
+            return
+        if self._init_error is not None:
+            raise RuntimeError(self._init_error)
+        if torch is None:
+            raise ImportError("PyTorch not found. Install optional deps: uv sync --extra rl")
+
+        from rl.mcts import MCTS
+        from rl.net import GoNet
+        from rl.utils import get_default_device, load_checkpoint
+
+        self.device = get_default_device()
+        board_size = board.size
+        self.model = GoNet(size=board_size).to(self.device)
+
+        checkpoint_file = self.checkpoint_path
+        if not checkpoint_file.is_absolute():
+            checkpoint_file = Path.cwd() / checkpoint_file
+        if not checkpoint_file.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_file}")
+
+        payload = load_checkpoint(checkpoint_file, map_location=self.device)
+        if isinstance(payload, dict):
+            state_dict = payload.get("model_state_dict") or payload.get("state_dict") or payload
+        else:
+            state_dict = payload
+        self.model.load_state_dict(state_dict, strict=True)
+        self.model.eval()
+        self.mcts = MCTS(self.model, c_puct=self.c_puct, num_simulations=self.num_simulations)
+        print(f"AlphaZeroPlayer loaded from {checkpoint_file} on {self.device}")
+
+    def _random_legal_move(self, board):
+        legal_moves = board.env.legal_moves(self.color)
+        if not legal_moves:
+            return None
+        return random.choice(legal_moves)
+
+    def make_move(self, board, event=None):
+        try:
+            self._ensure_initialized(board)
+        except Exception as exc:
+            if self._init_error is None:
+                self._init_error = str(exc)
+                print(f"AlphaZero unavailable ({exc}), fallback to random.")
+            move = self._random_legal_move(board)
+            if move is None:
+                return False
+            if board.place_stone(move[0], move[1], self.color):
+                self.move = move
+                self.my_move()
+                return True
+            return False
+
+        action = self.mcts.get_action(
+            board.env,
+            self.color,
+            temperature=1e-6,
+            device=self.device,
+            deterministic=True,
+        )
+
+        if action == (-1, -1):
+            return False
+
+        row, col = action
+        if board.place_stone(row, col, self.color):
+            self.move = (row, col)
+            self.my_move()
+            return True
+
+        # Rare fallback if something changed between search and apply.
+        move = self._random_legal_move(board)
+        if move and board.place_stone(move[0], move[1], self.color):
+            self.move = move
+            self.my_move()
+            return True
+        return False
 
 
 class RandomPlayer(GoPlayer):

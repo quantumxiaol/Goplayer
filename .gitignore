@@ -30,5 +30,6 @@ venv.bak/
 *.tmp
 
 checkpoints/
-
+runs/
+logs/
 uv.lock

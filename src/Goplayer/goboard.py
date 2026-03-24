@@ -5,7 +5,7 @@ from PyQt6.QtGui import QBrush, QColor, QPainter, QPen
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
 from .goenv import GoEnv
-from .goplayer import AIPlayer, HumanPlayer, RandomPlayer
+from .goplayer import AIPlayer, AlphaZeroPlayer, HumanPlayer, RandomPlayer
 
 
 class BoardSnapshot:
@@ -164,6 +164,9 @@ class GoBoard(QWidget):
         elif self.mode == "human_vs_ai":
             self.players["black"] = HumanPlayer("black")
             self.players["white"] = AIPlayer("white")
+        elif self.mode == "human_vs_alphazero":
+            self.players["black"] = HumanPlayer("black")
+            self.players["white"] = AlphaZeroPlayer("white")
         elif self.mode == "random_vs_random":
             self.players["black"] = RandomPlayer("black")
             self.players["white"] = RandomPlayer("white")
@@ -272,7 +275,7 @@ class GoBoard(QWidget):
         next_color = "white" if self.current_player.color == "black" else "black"
         self.current_player = self.players[next_color]
         self.update()
-        if isinstance(self.current_player, (AIPlayer, RandomPlayer)):
+        if isinstance(self.current_player, (AIPlayer, RandomPlayer, AlphaZeroPlayer)):
             QTimer.singleShot(100, self.make_ai_move)
 
     def _all_legal_moves(self, color):
@@ -350,7 +353,7 @@ class GoBoard(QWidget):
         if isinstance(self.current_player, AIPlayer):
             self._start_ai_move_async()
             return
-        if isinstance(self.current_player, RandomPlayer):
+        if isinstance(self.current_player, (RandomPlayer, AlphaZeroPlayer)):
             pass_streak_before_move = self.consecutive_passes
             if self.current_player.make_move(self):
                 if pass_streak_before_move > 0:

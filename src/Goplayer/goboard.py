@@ -257,7 +257,7 @@ class GoBoard(QWidget):
     def draw_turn_indicator(self, painter):
         if self.current_player is None:
             return
-        color_cn = "黑方" if self.current_player.color == "black" else "白方"
+        color_cn = self._color_label(self.current_player.color)
         status = "（AI 思考中）" if self.ai_thinking else ""
         text = f"当前回合：{color_cn}{status}"
         painter.setPen(QPen(QColor(20, 20, 20), 1))
@@ -286,6 +286,10 @@ class GoBoard(QWidget):
     def _all_legal_moves(self, color):
         return self.env.legal_moves(color)
 
+    @staticmethod
+    def _color_label(color):
+        return "黑方" if color == "black" else "白方"
+
     def _register_pass(self):
         if self.game_over:
             return
@@ -296,6 +300,41 @@ class GoBoard(QWidget):
             self.judge_winner()
             return
         self.switch_player()
+
+    def pass_turn(self):
+        if self.game_over:
+            QMessageBox.information(self, "提示", "对局已结束")
+            return
+        if self.ai_thinking:
+            QMessageBox.information(self, "提示", "AI 正在思考，请稍后再试")
+            return
+        if not isinstance(self.current_player, HumanPlayer):
+            QMessageBox.information(self, "提示", "当前为 AI 回合，不能手动停一手")
+            return
+        self._register_pass()
+
+    def resign_current_player(self):
+        if self.game_over:
+            QMessageBox.information(self, "提示", "对局已结束")
+            return
+        if self.ai_thinking:
+            QMessageBox.information(self, "提示", "AI 正在思考，请稍后再试")
+            return
+        if not isinstance(self.current_player, HumanPlayer):
+            QMessageBox.information(self, "提示", "当前为 AI 回合，不能手动认输")
+            return
+
+        loser = self.current_player.color
+        winner = "white" if loser == "black" else "black"
+        loser_cn = self._color_label(loser)
+        winner_cn = self._color_label(winner)
+
+        self._stop_ai_worker()
+        self.game_over = True
+        self.update()
+
+        print(f"{loser_cn}认输，{winner_cn}获胜")
+        QMessageBox.information(self, "比赛结果", f"{loser_cn}认输，{winner_cn}获胜")
 
     def _start_ai_move_async(self):
         if self.ai_thread is not None:

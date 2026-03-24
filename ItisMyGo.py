@@ -65,6 +65,8 @@ if __name__ == "__main__":
     # 选项菜单
     file_menu = menubar.addMenu("选项")
     file_menu.addAction("新游戏", lambda: current_board().reset())
+    file_menu.addAction("停一手", lambda: current_board().pass_turn())
+    file_menu.addAction("认输", lambda: current_board().resign_current_player())
     file_menu.addAction("判断胜负", lambda: current_board().judge_winner())
     file_menu.addAction("悔棋", lambda: current_board().undo_move())
 

@@ -33,6 +33,7 @@ uv run python ItisMyGo.py
 - `人人对弈`：双人本地落子
 - `人机对弈`：调用 OpenAI API 的 AI
 - `挑战 AlphaZero`：加载本地训练权重对弈
+- `AlphaZero vs AlphaZero`：双 AI 观战
 - `随机对弈`：双方随机落子
 
 - `棋盘大小`
@@ -103,6 +104,7 @@ ALPHAZERO_CHECKPOINT_PATH=checkpoints/best_model.pth
 - `RL_DEVICE` 支持 `auto / cpu / cuda / mps`
 - 命令行参数优先级高于 `.env`
 - `ALPHAZERO_CHECKPOINT_PATH` 用于 GUI 的「挑战 AlphaZero」模式加载权重
+- `AlphaZero` 模式会检查 checkpoint 与当前棋盘大小是否匹配（不匹配会拒绝加载并回退）
 
 ## 5. 棋盘大小与模型关系
 

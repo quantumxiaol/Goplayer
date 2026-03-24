@@ -167,6 +167,9 @@ class GoBoard(QWidget):
         elif self.mode == "human_vs_alphazero":
             self.players["black"] = HumanPlayer("black")
             self.players["white"] = AlphaZeroPlayer("white")
+        elif self.mode == "alphazero_vs_alphazero":
+            self.players["black"] = AlphaZeroPlayer("black")
+            self.players["white"] = AlphaZeroPlayer("white")
         elif self.mode == "random_vs_random":
             self.players["black"] = RandomPlayer("black")
             self.players["white"] = RandomPlayer("white")
@@ -174,7 +177,9 @@ class GoBoard(QWidget):
         self.current_player = self.players["black"]
         self.update()
 
-        if self.mode == "random_vs_random" and isinstance(self.current_player, RandomPlayer):
+        if self.mode in {"random_vs_random", "alphazero_vs_alphazero"} and isinstance(
+            self.current_player, (RandomPlayer, AlphaZeroPlayer)
+        ):
             QTimer.singleShot(100, self.make_ai_move)
 
     def setup_mode(self, mode):

@@ -1,5 +1,6 @@
 import os
 import random
+import math
 from pathlib import Path
 
 import openai
@@ -212,14 +213,55 @@ class AlphaZeroPlayer(GoPlayer):
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_file}")
 
         payload = load_checkpoint(checkpoint_file, map_location=self.device)
-        if isinstance(payload, dict):
-            state_dict = payload.get("model_state_dict") or payload.get("state_dict") or payload
-        else:
-            state_dict = payload
+        state_dict, metadata = self._parse_checkpoint_payload(payload)
+        checkpoint_board_size = metadata.get("board_size")
+        if checkpoint_board_size is None:
+            checkpoint_board_size = self._infer_board_size_from_state_dict(state_dict)
+        if checkpoint_board_size is not None and int(checkpoint_board_size) != int(board_size):
+            raise ValueError(
+                f"Checkpoint board_size={checkpoint_board_size} does not match current board size={board_size}."
+            )
+
         self.model.load_state_dict(state_dict, strict=True)
         self.model.eval()
         self.mcts = MCTS(self.model, c_puct=self.c_puct, num_simulations=self.num_simulations)
         print(f"AlphaZeroPlayer loaded from {checkpoint_file} on {self.device}")
+
+    def _parse_checkpoint_payload(self, payload):
+        if not isinstance(payload, dict):
+            return payload, {}
+
+        metadata = payload.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        state_dict = payload.get("model_state_dict") or payload.get("state_dict")
+        if state_dict is None:
+            # Backward compatibility: older checkpoints may store raw state_dict directly.
+            state_dict = payload
+        return state_dict, metadata
+
+    def _infer_board_size_from_state_dict(self, state_dict):
+        if not isinstance(state_dict, dict):
+            return None
+        policy_fc_weight = state_dict.get("policy_fc.weight")
+        if policy_fc_weight is None or not hasattr(policy_fc_weight, "shape"):
+            return None
+        if len(policy_fc_weight.shape) != 2:
+            return None
+
+        action_size = int(policy_fc_weight.shape[0])
+        flattened_features = int(policy_fc_weight.shape[1])
+        board_area = action_size - 1  # pass action
+        if board_area <= 0:
+            return None
+
+        side = math.isqrt(board_area)
+        if side * side != board_area:
+            return None
+        if flattened_features != 2 * side * side:
+            return None
+        return side
 
     def _random_legal_move(self, board):
         legal_moves = board.env.legal_moves(self.color)

@@ -53,6 +53,7 @@ if __name__ == "__main__":
     mode_menu.addAction("人人对弈", lambda: current_board().setup_mode("human_vs_human"))
     mode_menu.addAction("人机对弈", lambda: current_board().setup_mode("human_vs_ai"))
     mode_menu.addAction("挑战 AlphaZero", lambda: current_board().setup_mode("human_vs_alphazero"))
+    mode_menu.addAction("AlphaZero vs AlphaZero", lambda: current_board().setup_mode("alphazero_vs_alphazero"))
     mode_menu.addAction("随机对弈", lambda: current_board().setup_mode("random_vs_random"))
 
     # 棋盘大小菜单

@@ -51,7 +51,10 @@ class MCTSNode:
         exploration = c_puct * self.prior_prob * math.sqrt(max(parent_visit_count, 1)) / (
             1 + self.visit_count
         )
-        return self.q_value + exploration
+        # q_value is stored from this node's current player's perspective.
+        # During selection at the parent, this value must be negated so the parent
+        # compares actions from the parent's perspective.
+        return -self.q_value + exploration
 
     def is_expanded(self) -> bool:
         return len(self.children) > 0

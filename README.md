@@ -70,6 +70,9 @@ uv sync --all-extras
 uv run python scripts/train.py --board-size 9 --iterations 200
 ```
 
+如果传 `--checkpoint-dir`，它是根目录，实际会保存到：
+`<checkpoint-dir>/<board_size>x<board_size>/`
+
 快速冒烟（先确认流程能跑通）：
 
 ```bash
@@ -78,10 +81,12 @@ uv run python scripts/train.py --board-size 9 --iterations 5 --games-per-iterati
 
 ## 3. 训练输出
 
-- 模型权重默认保存到 `checkpoints/`
-- 训练日志默认保存到 `logs/`
-- `logs/train_metrics.csv`：每轮指标
-- `logs/events.out.tfevents.*`：TensorBoard 事件（启用后）
+- 模型权重默认保存到 `checkpoints/{board_size}x{board_size}/`
+  - 例如：9路保存到 `checkpoints/9x9/`
+- 训练日志根目录默认是 `logs/`
+- 每次训练会自动落到独立 run 目录：
+  - `logs/{board_size}x{board_size}/{run_name}/train_metrics.csv`
+  - `logs/{board_size}x{board_size}/{run_name}/events.out.tfevents.*`（启用 TensorBoard 时）
 
 TensorBoard 查看：
 
@@ -95,9 +100,11 @@ uv run tensorboard --logdir logs
 RL_DEVICE=auto
 RL_CHECKPOINT_DIR=checkpoints
 RL_LOG_DIR=logs
+RL_RUN_NAME=
 RL_TENSORBOARD=0
 RL_MIN_MOVES_BEFORE_PASS=30
-ALPHAZERO_CHECKPOINT_PATH=checkpoints/best_model.pth
+ALPHAZERO_CHECKPOINT_DIR=checkpoints
+# ALPHAZERO_CHECKPOINT_PATH=/abs/path/to/model.pth
 ALPHAZERO_MIN_MOVES_BEFORE_PASS=18
 ```
 
@@ -105,7 +112,11 @@ ALPHAZERO_MIN_MOVES_BEFORE_PASS=18
 
 - `RL_DEVICE` 支持 `auto / cpu / cuda / mps`
 - 命令行参数优先级高于 `.env`
-- `ALPHAZERO_CHECKPOINT_PATH` 用于 GUI 的「挑战 AlphaZero」模式加载权重
+- 训练时 `--checkpoint-dir` 是根目录，程序会自动写入 `{root}/{size}x{size}/`
+- 训练时 `--log-dir` 是根目录，程序会自动写入 `{root}/{size}x{size}/{run_name}/`
+- `--run-name` / `RL_RUN_NAME` 可用于手动命名本次训练日志目录（不填则自动时间戳）
+- GUI 默认按棋盘大小从 `ALPHAZERO_CHECKPOINT_DIR/{size}x{size}/best_model.pth` 自动加载
+- `ALPHAZERO_CHECKPOINT_PATH` 可选，设置后会覆盖自动路径
 - `RL_MIN_MOVES_BEFORE_PASS`：训练时前 N 手不允许 pass（除非无合法落子），减少“白方吃komi+早早双pass”塌缩
 - `ALPHAZERO_MIN_MOVES_BEFORE_PASS`：GUI 对弈时前 N 手不允许 pass（除非无合法落子）
 - `AlphaZero` 模式会检查 checkpoint 与当前棋盘大小是否匹配（不匹配会拒绝加载并回退）

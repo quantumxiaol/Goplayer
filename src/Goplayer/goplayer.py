@@ -181,8 +181,13 @@ class AlphaZeroPlayer(GoPlayer):
     ):
         super().__init__(color)
         load_dotenv()
-        default_checkpoint = os.getenv("ALPHAZERO_CHECKPOINT_PATH", "checkpoints/best_model.pth")
-        self.checkpoint_path = Path(checkpoint_path or default_checkpoint)
+        self.checkpoint_path_override = Path(checkpoint_path) if checkpoint_path else None
+        raw_checkpoint_path_env = os.getenv("ALPHAZERO_CHECKPOINT_PATH", "").strip()
+        # Backward compatibility: legacy default path should not disable size-based auto loading.
+        if raw_checkpoint_path_env == "checkpoints/best_model.pth":
+            raw_checkpoint_path_env = ""
+        self.checkpoint_path_env = raw_checkpoint_path_env
+        self.checkpoint_root_dir = Path(os.getenv("ALPHAZERO_CHECKPOINT_DIR", "checkpoints"))
         raw_min_moves = os.getenv("ALPHAZERO_MIN_MOVES_BEFORE_PASS")
         self.min_moves_before_pass = None
         if raw_min_moves is not None and raw_min_moves.strip():
@@ -213,9 +218,7 @@ class AlphaZeroPlayer(GoPlayer):
         board_size = board.size
         self.model = GoNet(size=board_size).to(self.device)
 
-        checkpoint_file = self.checkpoint_path
-        if not checkpoint_file.is_absolute():
-            checkpoint_file = Path.cwd() / checkpoint_file
+        checkpoint_file = self._resolve_checkpoint_file(board_size)
         if not checkpoint_file.exists():
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_file}")
 
@@ -233,6 +236,26 @@ class AlphaZeroPlayer(GoPlayer):
         self.model.eval()
         self.mcts = MCTS(self.model, c_puct=self.c_puct, num_simulations=self.num_simulations)
         print(f"AlphaZeroPlayer loaded from {checkpoint_file} on {self.device}")
+
+    def _resolve_checkpoint_file(self, board_size):
+        if self.checkpoint_path_override is not None:
+            return self._resolve_path(self.checkpoint_path_override)
+
+        if self.checkpoint_path_env:
+            env_path = Path(self.checkpoint_path_env)
+            if env_path.suffix.lower() == ".pth":
+                return self._resolve_path(env_path)
+            return self._resolve_path(env_path / f"{board_size}x{board_size}" / "best_model.pth")
+
+        auto_path = self.checkpoint_root_dir / f"{board_size}x{board_size}" / "best_model.pth"
+        return self._resolve_path(auto_path)
+
+    @staticmethod
+    def _resolve_path(path_obj):
+        path_obj = Path(path_obj)
+        if path_obj.is_absolute():
+            return path_obj
+        return Path.cwd() / path_obj
 
     def _parse_checkpoint_payload(self, payload):
         if not isinstance(payload, dict):

@@ -5,6 +5,7 @@ import argparse
 import os
 import random
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -43,8 +44,18 @@ class Trainer:
         self.args = args
         self.args.min_moves_before_pass = max(0, int(self.args.min_moves_before_pass))
         self.device = resolve_device(args.device)
-        self.checkpoint_dir = ensure_checkpoint_dir(args.checkpoint_dir)
-        self.log_dir = ensure_checkpoint_dir(args.log_dir)
+        self.checkpoint_root_dir = ensure_checkpoint_dir(args.checkpoint_dir)
+        self.checkpoint_dir = ensure_checkpoint_dir(
+            self.checkpoint_root_dir / f"{self.args.board_size}x{self.args.board_size}"
+        )
+        self.log_root_dir = ensure_checkpoint_dir(args.log_dir)
+        default_run_name = datetime.now().strftime("%Y%m%d-%H%M%S")
+        selected_run_name = (args.run_name or default_run_name).strip()
+        selected_run_name = selected_run_name.replace(" ", "_")
+        self.run_name = selected_run_name
+        self.log_dir = ensure_checkpoint_dir(
+            self.log_root_dir / f"{self.args.board_size}x{self.args.board_size}" / self.run_name
+        )
         self.buffer = ReplayBuffer(capacity=args.buffer_size)
 
         self.model = GoNet(
@@ -68,6 +79,8 @@ class Trainer:
 
     def run(self):
         print(f"Training on device: {self.device}")
+        print(f"Checkpoint dir: {self.checkpoint_dir}")
+        print(f"Log dir: {self.log_dir}")
         for iteration in range(1, self.args.iterations + 1):
             wins = {"black": 0, "white": 0}
 
@@ -205,6 +218,7 @@ def parse_args():
     env_device = os.getenv("RL_DEVICE", "auto")
     env_checkpoint_dir = os.getenv("RL_CHECKPOINT_DIR")
     env_log_dir = os.getenv("RL_LOG_DIR")
+    env_run_name = os.getenv("RL_RUN_NAME")
     env_tensorboard = _env_bool("RL_TENSORBOARD", False)
     env_min_moves_before_pass = _env_int("RL_MIN_MOVES_BEFORE_PASS", 30)
 
@@ -234,6 +248,7 @@ def parse_args():
         "--checkpoint-dir",
         type=Path,
         default=Path(env_checkpoint_dir) if env_checkpoint_dir else ROOT / "checkpoints",
+        help="Root checkpoint directory; models are saved into '<root>/<board_size>x<board_size>/'",
     )
     parser.add_argument(
         "--tensorboard",
@@ -245,6 +260,13 @@ def parse_args():
         "--log-dir",
         type=Path,
         default=Path(env_log_dir) if env_log_dir else ROOT / "logs",
+        help="Root log directory; logs are saved into '<root>/<board_size>x<board_size>/<run_name>/'",
+    )
+    parser.add_argument(
+        "--run-name",
+        type=str,
+        default=env_run_name,
+        help="Optional run name for log isolation. Default: timestamp like YYYYMMDD-HHMMSS.",
     )
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()

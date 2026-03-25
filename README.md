@@ -70,6 +70,19 @@ uv sync --all-extras
 uv run python scripts/train.py --board-size 9 --iterations 200
 ```
 
+9 路推荐（更稳，但更慢）：
+
+```bash
+uv run python scripts/train.py \
+  --board-size 9 \
+  --iterations 400 \
+  --games-per-iteration 16 \
+  --num-simulations 160 \
+  --min-moves-before-pass 50 \
+  --run-name bs9_stable_v1 \
+  --tensorboard
+```
+
 如果传 `--checkpoint-dir`，它是根目录，实际会保存到：
 `<checkpoint-dir>/<board_size>x<board_size>/`
 
@@ -78,6 +91,14 @@ uv run python scripts/train.py --board-size 9 --iterations 200
 ```bash
 uv run python scripts/train.py --board-size 9 --iterations 5 --games-per-iteration 2 --train-steps-per-iteration 2
 ```
+
+常用参数说明：
+
+- `--iterations`：训练轮数
+- `--games-per-iteration`：每轮自博弈局数
+- `--num-simulations`：每步 MCTS 模拟次数（越大越强，但越慢）
+- `--min-moves-before-pass`：前 N 手不允许 pass（减少过早双 pass）
+- `--run-name`：本次训练日志目录名
 
 ## 3. 训练输出
 
@@ -125,11 +146,11 @@ ALPHAZERO_MIN_MOVES_BEFORE_PASS=18
 
 不同棋盘大小需要分别训练并分别保存模型。
 
-建议命名：
+建议目录结构：
 
-- `checkpoints/best_model_9.pth`
-- `checkpoints/best_model_13.pth`
-- `checkpoints/best_model_19.pth`
+- `checkpoints/9x9/best_model.pth`
+- `checkpoints/13x13/best_model.pth`
+- `checkpoints/19x19/best_model.pth`
 
 # 规则说明
 

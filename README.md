@@ -4,6 +4,70 @@
 - GUI 对弈（人人 / 人机 / 随机 / 挑战本地 AlphaZero）
 - 9/13/19 路棋盘切换
 - 基于 `GoEnv` 的 AlphaZero 风格自博弈训练
+- `frontend/` 下的 React + Canvas + TypeScript 前端展示页
+
+# 前端展示（GitHub Pages / 本地预览）
+
+`frontend/` 是一个独立的前端演示页，主要用于展示围棋规则与后续接主项目。
+
+当前已实现：
+
+- 9/13/19 路棋盘切换
+- 双人本地对弈
+- 气、提子、自杀禁着、打劫/同形禁着
+- Pass、悔棋、面积计分、手顺显示
+- 9 路浏览器侧 ONNX 单步落子建议
+
+当前限制：
+
+- 只有 `9x9` 已训练并导出 ONNX
+- `13x13` / `19x19` 暂无模型，前端会明确显示为“未训练”
+- 前端 AI 目前是“单步建议”，还不是完整 MCTS 自动对弈
+
+## 1. 本地启动前端
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+打开：
+
+```text
+http://localhost:5173/goplayer/
+```
+
+说明：Vite 的 `base` 已固定为 `/goplayer/`，以匹配 GitHub Pages 项目页路径。
+
+## 2. 导出 ONNX 模型
+
+将训练好的 checkpoint 导出到前端静态目录：
+
+```bash
+uv sync --extra rl
+uv run --extra rl python scripts/export_onnx.py --checkpoint checkpoints/9x9/best_model.pth
+```
+
+默认输出到：
+
+- `frontend/public/models/9x9/goplayer_v1.onnx`
+- `frontend/public/models/9x9/goplayer_v1.json`
+
+后续如果训练出 13/19 路模型，也应分别导出到各自目录：
+
+- `frontend/public/models/13x13/`
+- `frontend/public/models/19x19/`
+
+## 3. GitHub Pages 部署
+
+该前端作为项目页部署到：
+
+```text
+https://quantumxiaol.github.io/goplayer/
+```
+
+需要在 **Goplayer 仓库本身** 启用 Pages，并选择 `GitHub Actions` 作为发布来源。
 
 # 普通用户：GUI 下棋
 

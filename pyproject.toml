@@ -19,6 +19,7 @@ gui = [
 rl = [
     "torch>=2.0.0",
     "numpy>=1.24.0",
+    "onnx>=1.18.0",
     "tqdm>=4.65.0",
     "tensorboard>=2.14.0",
 ]
@@ -27,6 +28,7 @@ all = [
     "PyQt6>=6.6.0",
     "torch>=2.0.0",
     "numpy>=1.24.0",
+    "onnx>=1.18.0",
     "tqdm>=4.65.0",
     "tensorboard>=2.14.0",
 ]

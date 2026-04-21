@@ -1,0 +1,14 @@
+{
+  "checkpoint": "checkpoints/9x9/best_model.pth",
+  "output": "frontend/public/models/goplayer_v1.onnx",
+  "board_size": 9,
+  "action_size": 82,
+  "input_name": "board_state",
+  "output_names": [
+    "policy_logits",
+    "value"
+  ],
+  "num_channels": 64,
+  "num_res_blocks": 3,
+  "opset": 17
+}

@@ -1,6 +1,6 @@
 import random
 
-from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QBrush, QColor, QPainter, QPen
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
@@ -15,22 +15,46 @@ class BoardSnapshot:
         self.position_history = position_history
 
 
-class AIMoveWorker(QObject):
-    finished = pyqtSignal(object)
-    failed = pyqtSignal(str)
+class AIMoveWorker(QThread):
+    result_ready = pyqtSignal(int, object)
+    failed = pyqtSignal(int, str)
+    # Workers outlive a replaced/deleted board until their network call returns.
+    active_workers = set()
 
-    def __init__(self, player, board_snapshot):
+    def __init__(self, player, board_snapshot, request_id):
         super().__init__()
         self.player = player
         self.board_snapshot = board_snapshot
+        self.request_id = request_id
+        self.finished.connect(self._dispose)
+
+    def start_request(self):
+        self.active_workers.add(self)
+        self.start()
 
     @pyqtSlot()
+    def _dispose(self):
+        self.active_workers.discard(self)
+        self.deleteLater()
+
+    @classmethod
+    def shutdown(cls):
+        workers = list(cls.active_workers)
+        for worker in workers:
+            worker.requestInterruption()
+        for worker in workers:
+            worker.wait()
+
     def run(self):
         try:
-            move = self.player.get_move_from_gpt(self.board_snapshot)
-            self.finished.emit(move)
+            move = self.player.get_move_from_gpt(
+                self.board_snapshot, should_cancel=self.isInterruptionRequested,
+            )
+            if not self.isInterruptionRequested():
+                self.result_ready.emit(self.request_id, move)
         except Exception as exc:
-            self.failed.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.failed.emit(self.request_id, str(exc))
 
 
 class GoBoard(QWidget):
@@ -44,8 +68,11 @@ class GoBoard(QWidget):
         self.margin = 25
         self.cell_size = 0
         self.ai_thread = None
-        self.ai_worker = None
+        self.ai_request_id = 0
         self.ai_thinking = False
+        self.ai_move_timer = QTimer(self)
+        self.ai_move_timer.setSingleShot(True)
+        self.ai_move_timer.timeout.connect(self.make_ai_move)
         self.setMinimumSize(700, 700)
         self.setup_players()
 
@@ -98,15 +125,11 @@ class GoBoard(QWidget):
         return self.env.board_signature(grid)
 
     def _stop_ai_worker(self):
+        self.ai_request_id += 1
+        self.ai_move_timer.stop()
         self.ai_thinking = False
-        if self.ai_thread is None:
-            return
-        self.ai_thread.quit()
-        self.ai_thread.wait(1000)
-        if self.ai_worker is not None:
-            self.ai_worker.deleteLater()
-        self.ai_thread.deleteLater()
-        self.ai_worker = None
+        if self.ai_thread is not None:
+            self.ai_thread.requestInterruption()
         self.ai_thread = None
 
     def reset(self):
@@ -180,7 +203,7 @@ class GoBoard(QWidget):
         if self.mode in {"random_vs_random", "alphazero_vs_alphazero"} and isinstance(
             self.current_player, (RandomPlayer, AlphaZeroPlayer)
         ):
-            QTimer.singleShot(100, self.make_ai_move)
+            self.ai_move_timer.start(100)
 
     def setup_mode(self, mode):
         self.mode = mode
@@ -235,8 +258,8 @@ class GoBoard(QWidget):
             painter.drawEllipse(x - radius, y - radius, radius * 2, radius * 2)
 
     def draw_stone(self, painter, row, col, color):
-        x = int(row * self.cell_size + self.margin)
-        y = int(col * self.cell_size + self.margin)
+        x = int(col * self.cell_size + self.margin)
+        y = int(row * self.cell_size + self.margin)
         radius = int(self.cell_size / 2)
         stone_color = QColor(0, 0, 0) if color == "black" else QColor(255, 255, 255)
         painter.setBrush(QBrush(stone_color))
@@ -247,8 +270,10 @@ class GoBoard(QWidget):
         if not self.moves_history:
             return
         row, col, _ = self.moves_history[-1]
-        x = int(row * self.cell_size + self.margin)
-        y = int(col * self.cell_size + self.margin)
+        if (row, col) == (-1, -1):
+            return
+        x = int(col * self.cell_size + self.margin)
+        y = int(row * self.cell_size + self.margin)
         radius = max(3, int(self.cell_size / 8))
         painter.setBrush(QBrush(QColor(255, 64, 64)))
         painter.setPen(Qt.PenStyle.NoPen)
@@ -281,7 +306,7 @@ class GoBoard(QWidget):
         self.current_player = self.players[next_color]
         self.update()
         if isinstance(self.current_player, (AIPlayer, RandomPlayer, AlphaZeroPlayer)):
-            QTimer.singleShot(100, self.make_ai_move)
+            self.ai_move_timer.start(100)
 
     def _all_legal_moves(self, color):
         return self.env.legal_moves(color)
@@ -293,7 +318,7 @@ class GoBoard(QWidget):
     def _register_pass(self):
         if self.game_over:
             return
-        count, ended = self.env.register_pass()
+        count, ended = self.env.register_pass(self.current_player.color)
         print(f"玩家 {self.current_player.color} pass（连续pass={count}）")
         if ended:
             print("连续两次 pass，游戏结束")
@@ -344,30 +369,34 @@ class GoBoard(QWidget):
             [row[:] for row in self.grid],
             set(self.position_history),
         )
-        self.ai_thread = QThread(self)
-        self.ai_worker = AIMoveWorker(self.current_player, snapshot)
-        self.ai_worker.moveToThread(self.ai_thread)
-        self.ai_thread.started.connect(self.ai_worker.run)
-        self.ai_worker.finished.connect(self._on_ai_move_ready)
-        self.ai_worker.failed.connect(self._on_ai_move_failed)
-        self.ai_worker.finished.connect(self._cleanup_ai_worker)
-        self.ai_worker.failed.connect(self._cleanup_ai_worker)
+        self.ai_request_id += 1
+        self.ai_thread = AIMoveWorker(self.current_player, snapshot, self.ai_request_id)
+        self.ai_thread.result_ready.connect(self._on_ai_move_ready)
+        self.ai_thread.failed.connect(self._on_ai_move_failed)
+        self.ai_thread.finished.connect(self._cleanup_ai_worker)
         self.ai_thinking = True
         self.update()
-        self.ai_thread.start()
+        self.ai_thread.start_request()
 
-    def _cleanup_ai_worker(self, *_):
+    @pyqtSlot()
+    def _cleanup_ai_worker(self):
+        if self.sender() is not self.ai_thread:
+            return
         self.ai_thinking = False
-        self._stop_ai_worker()
+        self.ai_thread = None
         self.update()
 
-    def _on_ai_move_ready(self, move):
-        if self.game_over or not isinstance(self.current_player, AIPlayer):
+    @pyqtSlot(int, object)
+    def _on_ai_move_ready(self, request_id, move):
+        if request_id != self.ai_request_id or self.game_over or not isinstance(self.current_player, AIPlayer):
             return
 
         if isinstance(move, (tuple, list)) and len(move) == 2:
             row, col = int(move[0]), int(move[1])
-            if (row, col) != (-1, -1) and self.place_stone(row, col, self.current_player.color):
+            if (row, col) == (-1, -1):
+                self._register_pass()
+                return
+            if self.place_stone(row, col, self.current_player.color):
                 self.switch_player()
                 return
 
@@ -379,10 +408,11 @@ class GoBoard(QWidget):
                 return
         self._register_pass()
 
-    def _on_ai_move_failed(self, error_message):
-        print(f"AI 线程调用失败：{error_message}")
-        if self.game_over:
+    @pyqtSlot(int, str)
+    def _on_ai_move_failed(self, request_id, error_message):
+        if request_id != self.ai_request_id or self.game_over or not isinstance(self.current_player, AIPlayer):
             return
+        print(f"AI 线程调用失败：{error_message}")
         legal_moves = self._all_legal_moves(self.current_player.color)
         if legal_moves:
             row, col = random.choice(legal_moves)
@@ -416,6 +446,8 @@ class GoBoard(QWidget):
         self._stop_ai_worker()
         self.current_player = self.players[undone_move[2]]
         self.update()
+        if isinstance(self.current_player, (AIPlayer, RandomPlayer, AlphaZeroPlayer)):
+            self.ai_move_timer.start(100)
 
     # 兼容旧接口
     def moves_history_store(self, row, col, color):

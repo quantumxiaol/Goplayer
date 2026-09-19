@@ -1,73 +1,35 @@
-# React + TypeScript + Vite
+# GoPlay 网页版
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Canvas 围棋界面，支持 9 / 13 / 19 路本地双人对弈，以及 9 路浏览器 ONNX 单步建议。
 
-Currently, two official plugins are available:
+项目介绍、截图、训练和部署说明见 [根目录 README](../README.md)。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 本地开发
 
-## React Compiler
+使用 Node.js 22.12+ 和 pnpm 10，在本目录执行：
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+打开 `http://localhost:5173/Goplayer/`，端口以 Vite 输出为准。`base` 区分大小写，配置为 `/Goplayer/`。
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+pnpm test       # AI 异步请求回归测试
+pnpm lint       # ESLint
+pnpm build      # TypeScript 检查与生产构建，输出到 dist/
+pnpm preview    # 本地预览构建结果
 ```
+
+## 主要文件
+
+| 文件 | 作用 |
+| --- | --- |
+| `src/game/goGame.ts` | 落子、提子、同形禁着、Pass、悔棋与面积计分 |
+| `src/game/modelConfig.ts` | 各棋盘尺寸的模型路径与启用状态 |
+| `src/hooks/useAI.ts` | ONNX Runtime Web 加载、编码与单步推理 |
+| `src/components/GoBoardCanvas.tsx` | 棋盘绘制与指针交互 |
+| `public/models/9x9/` | 随仓库提供的模型与导出元数据 |
+
+AI 在用户点击按钮后加载，推理在浏览器中执行，无需 Python 后端或 API Key。13 / 19 路暂未提供模型。当前 AI 不包含 MCTS 或自动对弈。

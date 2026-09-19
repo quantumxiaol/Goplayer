@@ -32,8 +32,8 @@ class HumanPlayer(GoPlayer):
         if event is None:
             return False
         pos = event.pos()
-        row = round((pos.x() - board.margin) / board.cell_size)
-        col = round((pos.y() - board.margin) / board.cell_size)
+        row = round((pos.y() - board.margin) / board.cell_size)
+        col = round((pos.x() - board.margin) / board.cell_size)
         if board.place_stone(row, col, self.color):
             self.move = (row, col)
             self.my_move()
@@ -44,7 +44,7 @@ class HumanPlayer(GoPlayer):
 def get_prompt(board_state, board, color="white"):
     prompt = (
         f"当前棋盘中，black为黑子，white为白子，empty为可落子的空点\n"
-        f"棋盘从左到右从上到下分别是1到{board.size}\n"
+        f"row 从上到下、col 从左到右，坐标均为 1 到 {board.size}。\n"
         f"当前棋盘状态如下：\n{board_state}\n"
         f"请注意，棋盘大小为 {board.size}x{board.size}。\n"
         f"你是一个围棋 AI，当前执子颜色为 {color}。\n"
@@ -60,7 +60,7 @@ def get_prompt(board_state, board, color="white"):
 def get_modfied_prompt(board_state, board, last_move, color="white"):
     prompt = (
         f"当前棋盘中，black为黑子，white为白子，empty为可落子的空点\n"
-        f"棋盘从左到右从上到下分别是1到{board.size}\n"
+        f"row 从上到下、col 从左到右，坐标均为 1 到 {board.size}。\n"
         f"当前棋盘状态如下：\n{board_state}\n"
         f"请注意，棋盘大小为 {board.size}x{board.size}。\n"
         f"你是一个围棋 AI，当前执子颜色为 {color}。\n"
@@ -82,85 +82,67 @@ class AIPlayer(GoPlayer):
         api_key = os.getenv("OPENAI_API_KEY")
         api_base = os.getenv("OPENAI_BASE_URL")
         self.model = model
-        self.client = openai.OpenAI(api_key=api_key, base_url=api_base)
-        self.tourance = 3  # 连续三次不合法后，随机选空位
+        self.client = openai.OpenAI(api_key=api_key, base_url=api_base, timeout=30.0, max_retries=0)
+        self.tourance = 3  # 连续三次不合法后，随机选合法落点
+
+    @staticmethod
+    def parse_move(text, size):
+        """Convert the API's one-based coordinates, preserving the Pass sentinel."""
+        row, col = map(int, text.strip().split(","))
+        if (row, col) == (-1, -1):
+            return (-1, -1)
+        if not (1 <= row <= size and 1 <= col <= size):
+            raise ValueError(f"Coordinates must be between 1 and {size}")
+        return row - 1, col - 1
 
     def make_move(self, board, event=None):
         move = self.get_move_from_gpt(board)
-        if move is None:
-            move = self.make_random_move(board, event)
-            print("AI 随机选择位置：", move)
-        else:
-            print("AI 选择位置：", move)
-
-        row, col = move
-        if board.place_stone(row, col, self.color):
-            self.move = (row, col)
+        if move is None or move == (-1, -1):
+            return False
+        if board.place_stone(*move, self.color):
+            self.move = move
             self.my_move()
             return True
         return False
 
     def make_random_move(self, board, event=None):
-        empty_positions = [
-            (r, c) for r in range(board.size) for c in range(board.size) if board.grid[r][c] is None
+        legal = [
+            (r, c) for r in range(board.size) for c in range(board.size)
+            if self.isLegelMove(board, r, c)
         ]
-        if not empty_positions:
-            return False
-        row, col = random.choice(empty_positions)
-        return (row, col)
+        return random.choice(legal) if legal else None
 
-    def get_move_from_gpt(self, board):
-        tourance = self.tourance
+    def get_move_from_gpt(self, board, should_cancel=None):
+        cancelled = should_cancel or (lambda: False)
         board_state = "\n".join(
             [" ".join([str(cell) if cell is not None else "empty" for cell in row]) for row in board.grid]
         )
-
-        prompt = get_prompt(board_state, board)
-        messages = [
-            {"role": "system", "content": "你是一个厉害的围棋选手,现在和我下棋。"},
-            {"role": "user", "content": prompt},
-        ]
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.1,
-            )
-            move_str = response.choices[0].message.content.strip()
-            row, col = map(int, move_str.split(","))
-            print(f"AI 玩家下棋位置：{row}, {col}")
-            move = (row, col)
-            is_legal_move = self.isLegelMove(board, row, col)
-
-            while not is_legal_move:
-                print(f"AI 玩家下棋位置不合法：{row}, {col}")
-                tourance -= 1
-                if tourance > 0:
-                    prompt_modify = get_modfied_prompt(board_state, board, move_str, self.color)
-                    messages = [
-                        {"role": "system", "content": "你是一个厉害的围棋选手,现在和我下棋。"},
-                        {"role": "user", "content": prompt_modify},
-                    ]
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        temperature=0.1,
-                    )
-                    move_str = response.choices[0].message.content.strip()
-                    row, col = map(int, move_str.split(","))
-                    move = (row, col)
-                    is_legal_move = self.isLegelMove(board, row, col)
-                else:
-                    print("AI 玩家连续下棋位置不合法，随机选择一个空位")
-                    move = self.make_random_move(board, event=None)
-                    if move:
-                        row, col = move
-                        print(f"AI 随机选择位置：{row}, {col}")
-                    break
-            return move
-        except Exception as e:
-            print(f"Error calling OpenAI API: {e}")
-            return self.make_random_move(board, event=None)
+        prompt = get_prompt(board_state, board, self.color)
+        for _ in range(self.tourance):
+            if cancelled():
+                return None
+            messages = [
+                {"role": "system", "content": "你是一个厉害的围棋选手,现在和我下棋。"},
+                {"role": "user", "content": prompt},
+            ]
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model, messages=messages, temperature=0.1,
+                )
+                if cancelled():
+                    return None
+                move_str = response.choices[0].message.content or ""
+                try:
+                    move = self.parse_move(move_str, board.size)
+                    if move == (-1, -1) or self.isLegelMove(board, *move):
+                        return move
+                except (ValueError, TypeError):
+                    pass
+                prompt = get_modfied_prompt(board_state, board, move_str, self.color)
+            except Exception as exc:
+                print(f"Error calling OpenAI API: {exc}")
+                break
+        return None if cancelled() else self.make_random_move(board)
 
     def isLegelMove(self, board, row, col):
         return is_valid_move(board, row, col, self.color)

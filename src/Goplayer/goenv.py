@@ -142,9 +142,20 @@ class GoEnv:
         self.consecutive_passes = 0
         return True
 
-    def register_pass(self):
+    def register_pass(self, color=None):
         if self.game_over:
             return self.consecutive_passes, True
+        if color is None:
+            previous_color = self.moves_history[-1][2] if self.moves_history else "white"
+            color = "white" if previous_color == "black" else "black"
+        self.undo_stack.append({
+            "grid": [line[:] for line in self.grid],
+            "captures": self.captures.copy(),
+            "position_history": set(self.position_history),
+            "consecutive_passes": self.consecutive_passes,
+            "game_over": self.game_over,
+        })
+        self.moves_history.append((-1, -1, color))
         self.consecutive_passes += 1
         if self.consecutive_passes >= 2:
             self.game_over = True

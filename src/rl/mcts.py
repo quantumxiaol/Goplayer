@@ -71,6 +71,8 @@ class MCTS:
         self.model = model
         self.c_puct = float(c_puct)
         self.num_simulations = int(num_simulations)
+        if self.num_simulations < 1:
+            raise ValueError("num_simulations must be at least 1")
 
     def _evaluate_policy_value(self, env, current_color: str, device):
         state = encode_state(env, current_color).unsqueeze(0).to(device)
@@ -124,12 +126,12 @@ class MCTS:
 
     def _apply_action(self, env, action: Tuple[int, int], current_color: str):
         if action == PASS_MOVE:
-            env.register_pass()
+            env.register_pass(current_color)
             return
         row, col = action
         if not env.place_stone(row, col, current_color):
             # Should be rare because actions are legal by construction.
-            env.register_pass()
+            env.register_pass(current_color)
 
     def _terminal_value(self, env, current_color: str) -> float:
         black_score, white_score = env.calculate_area_score()
@@ -151,6 +153,8 @@ class MCTS:
         device="cpu",
         allow_pass: bool = True,
     ):
+        if root_env.game_over:
+            raise ValueError("Cannot search a finished game")
         root = MCTSNode()
 
         for _ in range(self.num_simulations):
@@ -182,7 +186,13 @@ class MCTS:
             visit_counts[action_to_index(action, root_env.size)] = float(child.visit_count)
 
         if visit_counts.sum() <= 0:
-            return np.ones(action_size, dtype=np.float32) / action_size
+            # One simulation expands only the root. Use its legal priors rather
+            # than assigning probability to occupied points or forbidden Pass.
+            for action, child in root.children.items():
+                visit_counts[action_to_index(action, root_env.size)] = child.prior_prob
+            if visit_counts.sum() <= 0:
+                for action in root.children:
+                    visit_counts[action_to_index(action, root_env.size)] = 1.0
 
         def _argmax_one_hot():
             probs = np.zeros_like(visit_counts, dtype=np.float32)
@@ -193,9 +203,6 @@ class MCTS:
             return _argmax_one_hot()
 
         positive_mask = visit_counts > 0
-        if not np.any(positive_mask):
-            return np.ones(action_size, dtype=np.float32) / action_size
-
         # Use log-space temperature scaling to avoid overflow when temperature is very small.
         logits = np.full(action_size, -np.inf, dtype=np.float64)
         logits[positive_mask] = np.log(visit_counts[positive_mask]) / float(temperature)

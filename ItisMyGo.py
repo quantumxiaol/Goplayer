@@ -9,11 +9,12 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from Goplayer.goboard import GoBoard
+from Goplayer.goboard import AIMoveWorker, GoBoard
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.aboutToQuit.connect(AIMoveWorker.shutdown)
 
     main_window = QMainWindow()
     main_window.setWindowTitle("围棋游戏")
@@ -34,7 +35,7 @@ if __name__ == "__main__":
         if old_board.size == new_size:
             return
         current_mode = old_board.mode
-        old_board.reset()  # 停止潜在 AI 线程
+        old_board._stop_ai_worker()
 
         new_board = GoBoard(size=new_size)
         state["board"] = new_board

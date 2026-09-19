@@ -1,226 +1,221 @@
-# Goplayer
-一个基于 **PyQt6** 的围棋程序，支持：
+# GoPlay · Goplayer
 
-- GUI 对弈（人人 / 人机 / 随机 / 挑战本地 AlphaZero）
-- 9/13/19 路棋盘切换
-- 基于 `GoEnv` 的 AlphaZero 风格自博弈训练
-- `frontend/` 下的 React + Canvas + TypeScript 前端展示页
+一个围棋学习与实验项目：用 **React + Canvas** 在浏览器中对弈，用 **PyQt6** 运行桌面棋盘，用 **PyTorch + MCTS** 探索 AlphaZero 风格的自博弈训练。
 
-# 前端展示（GitHub Pages / 本地预览）
+支持 9 / 13 / 19 路棋盘。网页端已附带 **9 路 ONNX 模型**，可直接在浏览器中请求单步落子建议。
 
-`frontend/` 是一个独立的前端演示页，主要用于展示围棋规则与后续接主项目。
+[快速开始](#快速开始) · [桌面版](#桌面版) · [训练与模型导出](#训练与模型导出) · [规则与限制](#规则与限制)
 
-当前已实现：
+## 界面预览
 
-- 9/13/19 路棋盘切换
-- 双人本地对弈
-- 气、提子、自杀禁着、打劫/同形禁着
-- Pass、悔棋、面积计分、手顺显示
-- 9 路浏览器侧 ONNX 单步落子建议
+### 网页版 · 9 路对弈与 AI 建议
 
-当前限制：
+以下为本地实际运行截图，展示落子、最近手顺、面积计分和 ONNX 建议。AI 建议需要手动落子，不会自动代下。
 
-- 只有 `9x9` 已训练并导出 ONNX
-- `13x13` / `19x19` 暂无模型，前端会明确显示为“未训练”
-- 前端 AI 目前是“单步建议”，还不是完整 MCTS 自动对弈
+![GoPlay 网页版：9 路对局、AI 建议与局面信息](docs/screenshots/web-9x9-ai.png)
 
-## 1. 本地启动前端
+<details>
+<summary>桌面版界面预览</summary>
+
+![PyQt 围棋桌面版旧版界面](png/interface.png)
+
+该图展示桌面棋盘外观；当前版本还提供棋盘大小切换与本地 AlphaZero 模式，菜单以实际运行界面为准。
+
+</details>
+
+## 功能一览
+
+| 功能 | 网页版 | 桌面版 / Python |
+| --- | --- | --- |
+| 9 / 13 / 19 路棋盘 | 支持 | 支持 |
+| 本地双人对弈 | 支持 | 支持 |
+| 提子、自杀禁着、同形禁着 | 支持 | 支持 |
+| Pass、悔棋、面积计分 | 支持 | 支持 |
+| AI 建议 | 9 路 ONNX 单步建议 | 本地网络 + MCTS 对弈 |
+| 外部模型 API 对弈 | 无 | 支持 OpenAI 兼容接口 |
+| 随机对弈 / 双 AI 观战 | 无 | 支持 |
+| 自博弈训练 | 无 | PyTorch 策略 / 价值双头网络 |
+
+13 / 19 路目前还没有训完，页面会显示“未训练”。项目定位为学习与实验，尚未提供棋力评级或标准对局评测。
+
+## 快速开始
+
+### 网页版
+
+环境：**Node.js 22.12+、pnpm 10**。以下命令从项目根目录执行：
 
 ```bash
 cd frontend
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-打开：
+访问 **http://localhost:5173/Goplayer/**，实际端口以终端输出为准。
 
-```text
-http://localhost:5173/goplayer/
-```
+1. 点击棋盘交叉点落子，黑先、双方交替。
+2. 点击 **AI 建议**，首次使用时加载模型与 WASM 运行时；仅 9 路可用。
+3. 点击 **Pass** 停一手，连续两次 Pass 后按当前盘面计分。
+4. **悔棋** 撤销上一手；**重开**或切换棋盘尺寸会清空当前对局。
 
-说明：Vite 的 `base` 已固定为 `/goplayer/`，以匹配 GitHub Pages 项目页路径。
-
-## 2. 导出 ONNX 模型
-
-将训练好的 checkpoint 导出到前端静态目录：
+检查和构建：
 
 ```bash
-uv sync --extra rl
-uv run --extra rl python scripts/export_onnx.py --checkpoint checkpoints/9x9/best_model.pth
+pnpm lint
+pnpm build
+pnpm preview
 ```
 
-默认输出到：
+构建产物位于 `frontend/dist/`；预览地址通常为 `http://localhost:4173/Goplayer/`。
 
-- `frontend/public/models/9x9/goplayer_v1.onnx`
-- `frontend/public/models/9x9/goplayer_v1.json`
+### GitHub Pages
 
-后续如果训练出 13/19 路模型，也应分别导出到各自目录：
+仓库已有 [部署工作流](.github/workflows/deploy-gh-pages.yml)。
 
-- `frontend/public/models/13x13/`
-- `frontend/public/models/19x19/`
+## 桌面版
 
-## 3. GitHub Pages 部署
-
-该前端作为项目页部署到：
-
-```text
-https://quantumxiaol.github.io/goplayer/
-```
-
-需要在 **Goplayer 仓库本身** 启用 Pages，并选择 `GitHub Actions` 作为发布来源。
-
-# 普通用户：GUI 下棋
-
-## 1. 安装（仅 GUI）
+环境：**Python 3.12+、uv**。在项目根目录运行：
 
 ```bash
 uv sync --extra gui
+uv run --extra gui python ItisMyGo.py
 ```
 
-如果你要玩「人机对弈（OpenAI API）」模式，再配置 `.env`（可参考 `.env.template`）：
+可选模式：**人人对弈、人机对弈、挑战 AlphaZero、AlphaZero vs AlphaZero、随机对弈**。通过菜单切换棋盘尺寸，或执行新游戏、停一手、认输、判断胜负与悔棋。
 
-```bash
+### 外部 API 对弈
+
+在项目根目录创建 `.env`，参考 [.env.template](.env.template) 填写服务商配置：
+
+```dotenv
 OPENAI_MODEL="your-model"
 OPENAI_API_KEY="your-key"
-OPENAI_BASE_URL="your-base-url"
+OPENAI_BASE_URL="https://your-provider.example/v1"
 ```
 
-## 2. 启动 GUI
+此模式会把棋盘状态发送给所配置的服务商，并可能产生 API 费用。网页端与本地 AlphaZero 模式不使用这些配置。
+
+### 本地 AlphaZero 对弈
 
 ```bash
-uv run python ItisMyGo.py
+uv sync --extra gui --extra rl
+uv run --extra gui --extra rl python ItisMyGo.py
 ```
 
-## 3. 在界面里怎么用
+默认按棋盘尺寸加载 `checkpoints/{size}x{size}/best_model.pth`，例如 `checkpoints/9x9/best_model.pth`。该目录被 Git 忽略，克隆仓库后需要自行训练或准备兼容权重；网页附带的 `.onnx` 文件不能直接替代桌面版 `.pth`。
 
-- `对弈模式`
-- `人人对弈`：双人本地落子
-- `人机对弈`：调用 OpenAI API 的 AI
-- `挑战 AlphaZero`：加载本地训练权重对弈
-- `AlphaZero vs AlphaZero`：双 AI 观战
-- `随机对弈`：双方随机落子
+缺少依赖、权重或权重尺寸不匹配时，当前实现会在终端输出原因，并回退到随机合法落子。
 
-- `棋盘大小`
-- `9路 / 13路 / 19路` 可随时切换
+## 训练与模型导出
 
-- `选项`
-- `新游戏 / 停一手 / 认输 / 判断胜负 / 悔棋`
-
-# 强化学习训练（AlphaZero 风格）
-
-## 1. 安装训练依赖
-
-仅训练（无 GUI）：
+### 1. 安装训练依赖
 
 ```bash
 uv sync --extra rl
 ```
 
-完整环境（GUI + RL）：
+### 2. 验证训练流程
+
+以下配置仅用于快速检查自博弈、反向传播和权重保存，不用于评估棋力。独立输出目录可避免覆盖已有模型：
 
 ```bash
-uv sync --extra all
-# 或
-uv sync --extra gui --extra rl
-# 或
-uv sync --all-extras
+uv run --extra rl python scripts/train.py \
+  --board-size 9 --iterations 1 \
+  --games-per-iteration 1 --num-simulations 2 \
+  --max-moves 6 --batch-size 2 \
+  --train-steps-per-iteration 1 --save-interval 1 \
+  --device cpu --checkpoint-dir checkpoints/smoke \
+  --log-dir logs/smoke --run-name smoke --no-tensorboard
 ```
 
-## 2. 开始训练
-
-示例（9 路）：
+### 3. 运行自博弈训练
 
 ```bash
-uv run python scripts/train.py --board-size 9 --iterations 200
+uv run --extra rl python scripts/train.py \
+  --board-size 9 --iterations 200 --tensorboard
 ```
 
-9 路推荐（更稳，但更慢）：
+| 参数 | 默认值 | 作用 |
+| --- | --- | --- |
+| `--games-per-iteration` | `8` | 每轮自博弈局数 |
+| `--num-simulations` | `80` | 每步 MCTS 模拟次数；增大后计算开销也增加 |
+| `--batch-size` | `128` | 回放训练批大小；样本不足时跳过更新 |
+| `--min-moves-before-pass` | `30` | 前 N 手限制 Pass；可由 `.env` 覆盖 |
+| `--save-interval` | `10` | 每 N 轮保存模型 |
+| `--device` | `auto` | `auto / cpu / cuda / mps`；可由 `.env` 覆盖 |
+| `--run-name` | 时间戳 | 区分训练日志目录 |
+
+完整参数：`uv run --extra rl python scripts/train.py --help`。
+
+输出结构：
+
+```text
+checkpoints/9x9/
+├── model_v10.pth
+└── best_model.pth
+logs/9x9/<run_name>/
+├── train_metrics.csv
+└── events.out.tfevents.*   # 启用 TensorBoard 时生成
+```
+
+`--checkpoint-dir` 与 `--log-dir` 都是根目录，脚本会自动追加棋盘尺寸。`best_model.pth` 根据保存轮次的平均训练损失选取，未经过对局胜率选拔；相同权重目录中的同名文件会被后续训练覆盖，`--run-name` 只隔离日志。
 
 ```bash
-uv run python scripts/train.py \
-  --board-size 9 \
-  --iterations 400 \
-  --games-per-iteration 16 \
-  --num-simulations 160 \
-  --min-moves-before-pass 50 \
-  --run-name bs9_stable_v1 \
-  --tensorboard
+uv run --extra rl tensorboard --logdir logs
 ```
 
-如果传 `--checkpoint-dir`，它是根目录，实际会保存到：
-`<checkpoint-dir>/<board_size>x<board_size>/`
+训练配置还可通过 `.env` 中的 `RL_DEVICE`、`RL_CHECKPOINT_DIR`、`RL_LOG_DIR`、`RL_RUN_NAME`、`RL_TENSORBOARD` 和 `RL_MIN_MOVES_BEFORE_PASS` 设置，命令行参数优先。桌面版使用 `ALPHAZERO_CHECKPOINT_DIR`、`ALPHAZERO_CHECKPOINT_PATH` 与 `ALPHAZERO_MIN_MOVES_BEFORE_PASS`，详见 [.env.template](.env.template)。
 
-快速冒烟（先确认流程能跑通）：
+### 4. 导出到浏览器
 
 ```bash
-uv run python scripts/train.py --board-size 9 --iterations 5 --games-per-iteration 2 --train-steps-per-iteration 2
+uv run --extra rl python scripts/export_onnx.py \
+  --checkpoint checkpoints/9x9/best_model.pth
 ```
 
-常用参数说明：
+默认生成 `frontend/public/models/9x9/goplayer_v1.onnx` 和同名 `.json` 元数据，导出时会执行 ONNX 格式检查。如果训练使用了自定义网络宽度或深度，导出时需要传入匹配的 `--num-channels` 和 `--num-res-blocks`。
 
-- `--iterations`：训练轮数
-- `--games-per-iteration`：每轮自博弈局数
-- `--num-simulations`：每步 MCTS 模拟次数（越大越强，但越慢）
-- `--min-moves-before-pass`：前 N 手不允许 pass（减少过早双 pass）
-- `--run-name`：本次训练日志目录名
+不同棋盘尺寸需要分别训练。导出 13 / 19 路模型后，还需要修改 [modelConfig.ts](frontend/src/game/modelConfig.ts) 中对应尺寸的 `trained`、`modelPath` 和说明文字，前端才会启用 AI 按钮。
 
-## 3. 训练输出
+## 规则与限制
 
-- 模型权重默认保存到 `checkpoints/{board_size}x{board_size}/`
-  - 例如：9路保存到 `checkpoints/9x9/`
-- 训练日志根目录默认是 `logs/`
-- 每次训练会自动落到独立 run 目录：
-  - `logs/{board_size}x{board_size}/{run_name}/train_metrics.csv`
-  - `logs/{board_size}x{board_size}/{run_name}/events.out.tfevents.*`（启用 TensorBoard 时）
+- 落子后先提掉无气敌块，再判断己方是否有气；禁止自杀着。
+- 使用棋盘历史签名检查 **Positional Superko（全局同形禁着）**。
+- 连续两次 Pass 终局，按盘上棋子与单色围住的空点进行面积计分。不会自动识别或移除死子，应先完成争议区域的对弈。
+- 默认白方贴目：9 路 **5.5**、13 路 **2.0**、19 路 **7.5**。
+- 网页 AI 使用策略网络单次推理，不含 MCTS。界面的“置信度”是合法候选着法中的策略概率，不代表胜率；价值输出也未经棋力校准。
+- 网页对局保存在内存中，刷新页面会丢失，尚无棋谱导入 / 导出与在线联机功能。
 
-TensorBoard 查看：
+规则背景见 [GoRules.md](GoRules.md)。
+
+## 项目结构
+
+```text
+ItisMyGo.py               桌面版入口
+src/Goplayer/            Python 规则环境、棋盘与棋手
+src/rl/                  编码器、策略价值网络、MCTS、回放缓冲
+scripts/train.py         自博弈训练
+scripts/export_onnx.py   模型导出
+frontend/src/            React 页面、Canvas 棋盘、TypeScript 规则引擎
+frontend/public/models/ 浏览器模型与元数据
+docs/screenshots/        界面截图
+tests/                   Python 规则、AI 与 Qt 线程回归测试
+frontend/tests/          前端 AI 异步请求回归测试
+```
+
+## 回归测试
+
+前端（在 `frontend/` 中运行）：
 
 ```bash
-uv run tensorboard --logdir logs
+pnpm test
+pnpm lint
+pnpm build
 ```
 
-## 4. 训练配置（`.env`）
+Python（在项目根目录运行，需要 GUI 与训练依赖）：
 
 ```bash
-RL_DEVICE=auto
-RL_CHECKPOINT_DIR=checkpoints
-RL_LOG_DIR=logs
-RL_RUN_NAME=
-RL_TENSORBOARD=0
-RL_MIN_MOVES_BEFORE_PASS=30
-ALPHAZERO_CHECKPOINT_DIR=checkpoints
-# ALPHAZERO_CHECKPOINT_PATH=/abs/path/to/model.pth
-ALPHAZERO_MIN_MOVES_BEFORE_PASS=18
+uv run --extra gui --extra rl python -m unittest discover -s tests -v
 ```
 
-说明：
-
-- `RL_DEVICE` 支持 `auto / cpu / cuda / mps`
-- 命令行参数优先级高于 `.env`
-- 训练时 `--checkpoint-dir` 是根目录，程序会自动写入 `{root}/{size}x{size}/`
-- 训练时 `--log-dir` 是根目录，程序会自动写入 `{root}/{size}x{size}/{run_name}/`
-- `--run-name` / `RL_RUN_NAME` 可用于手动命名本次训练日志目录（不填则自动时间戳）
-- GUI 默认按棋盘大小从 `ALPHAZERO_CHECKPOINT_DIR/{size}x{size}/best_model.pth` 自动加载
-- `ALPHAZERO_CHECKPOINT_PATH` 可选，设置后会覆盖自动路径
-- `RL_MIN_MOVES_BEFORE_PASS`：训练时前 N 手不允许 pass（除非无合法落子），减少“白方吃komi+早早双pass”塌缩
-- `ALPHAZERO_MIN_MOVES_BEFORE_PASS`：GUI 对弈时前 N 手不允许 pass（除非无合法落子）
-- `AlphaZero` 模式会检查 checkpoint 与当前棋盘大小是否匹配（不匹配会拒绝加载并回退）
-
-## 5. 棋盘大小与模型关系
-
-不同棋盘大小需要分别训练并分别保存模型。
-
-建议目录结构：
-
-- `checkpoints/9x9/best_model.pth`
-- `checkpoints/13x13/best_model.pth`
-- `checkpoints/19x19/best_model.pth`
-
-# 规则说明
-
-- 终局：双 Pass
-- 禁入点：Suicide Rule
-- 打劫：Positional Superko
-- 计分：Tromp-Taylor（白方含贴目 Komi）
-
-更多规则见：[GoRules.md](GoRules.md)
+测试覆盖 Pass 悔棋、API 坐标转换、MCTS 合法动作、Qt 工作线程生命周期，以及网页端重开 / 切盘 / 悔棋时的过期 AI 请求。外部 API 使用模拟响应，测试不会请求真实服务。

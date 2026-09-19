@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { GoBoardCanvas } from './components/GoBoardCanvas'
 import {
@@ -56,6 +56,8 @@ function formatSuggestion(row: number | null, col: number | null, size: number):
 }
 
 function App() {
+  const noticeRequestId = useRef(0)
+  useEffect(() => () => { noticeRequestId.current += 1 }, [])
   const [game, setGame] = useState(() => new GoGame(9))
   const [notice, setNotice] = useState('黑先。点击棋盘交叉点开始对弈。')
   const snapshot = game.toSnapshot()
@@ -74,6 +76,7 @@ function App() {
   const recentMoves = [...snapshot.moves].slice(-10).reverse()
 
   const replaceGame = (nextGame: GoGame, message: string) => {
+    noticeRequestId.current += 1
     ai.clearSuggestion()
     setGame(nextGame)
     setNotice(message)
@@ -161,7 +164,11 @@ function App() {
       return
     }
 
+    const requestId = ++noticeRequestId.current
     const suggestion = await ai.suggestMove()
+    if (requestId !== noticeRequestId.current) {
+      return
+    }
     if (!suggestion) {
       setNotice(ai.error ?? 'AI 暂时没有返回建议落点。')
       return

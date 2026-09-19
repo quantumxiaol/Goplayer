@@ -157,11 +157,11 @@ class Trainer:
                 action = random.choice(legal_moves)
 
             if action == PASS_MOVE:
-                env.register_pass()
+                env.register_pass(current_color)
             else:
                 row, col = action
                 if not env.place_stone(row, col, current_color):
-                    env.register_pass()
+                    env.register_pass(current_color)
 
             current_color = other_color(current_color)
             move_count += 1

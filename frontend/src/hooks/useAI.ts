@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as ort from 'onnxruntime-web/wasm'
 import ortWasmModuleUrl from 'onnxruntime-web/ort-wasm-simd-threaded.mjs?url'
 import ortWasmBinaryUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url'
@@ -137,6 +137,7 @@ export function useAI({
   enabled = true,
   executionProviders = DEFAULT_EXECUTION_PROVIDERS,
 }: UseAIOptions): UseAIResult {
+  const requestId = useRef(0)
   const [loadState, setLoadState] = useState<{
     key: string
     session: ort.InferenceSession | null
@@ -159,11 +160,17 @@ export function useAI({
   const loadKey = `${resolvedModelPath ?? 'no-model'}::${providerKey}`
   const session = loadState.key === loadKey ? loadState.session : null
   const loadError = loadState.key === loadKey ? loadState.error : null
+  useEffect(() => () => {
+    requestId.current += 1
+  }, [game, loadKey, activeColor, allowPass])
+  useEffect(() => () => {
+    void loadState.session?.release()
+  }, [loadState.session])
   const status: UseAIResult['status'] = !enabled
     ? 'idle'
     : thinking
       ? 'thinking'
-      : loadError
+      : runtimeError || loadError
         ? 'error'
         : session
           ? 'ready'
@@ -172,7 +179,7 @@ export function useAI({
             : 'idle'
   const error = enabled ? runtimeError ?? loadError : null
 
-  const createSession = async (): Promise<ort.InferenceSession | null> => {
+  const createSession = async (id: number): Promise<ort.InferenceSession | null> => {
     if (!enabled || !resolvedModelPath) {
       return null
     }
@@ -191,6 +198,10 @@ export function useAI({
         executionProviders: normalizedExecutionProviders,
         graphOptimizationLevel: 'all',
       })
+      if (id !== requestId.current) {
+        await nextSession.release()
+        return null
+      }
       setLoadState({
         key: loadKey,
         session: nextSession,
@@ -199,6 +210,9 @@ export function useAI({
       setRuntimeError(null)
       return nextSession
     } catch (cause) {
+      if (id !== requestId.current) {
+        return null
+      }
       setLoadState({
         key: loadKey,
         session: null,
@@ -209,6 +223,8 @@ export function useAI({
   }
 
   const clearSuggestion = () => {
+    requestId.current += 1
+    setThinking(false)
     setSuggestion(null)
     setValue(null)
     setRuntimeError(null)
@@ -216,16 +232,16 @@ export function useAI({
   }
 
   const suggestMove = async (): Promise<AIMoveSuggestion | null> => {
-    if (!enabled || !resolvedModelPath) {
+    if (!enabled || !resolvedModelPath || snapshot.gameOver) {
       return null
     }
+    const id = ++requestId.current
     setThinking(true)
     setRuntimeError(null)
 
     try {
-      const currentSession = await createSession()
-      if (!currentSession) {
-        setThinking(false)
+      const currentSession = await createSession(id)
+      if (!currentSession || id !== requestId.current) {
         return null
       }
       const inputData = encodeBoard(snapshot, activeColor)
@@ -238,6 +254,9 @@ export function useAI({
       const outputs = await currentSession.run({
         [currentSession.inputNames[0]]: inputTensor,
       })
+      if (id !== requestId.current) {
+        return null
+      }
 
       const policyOutput = outputs.policy_logits ?? outputs[currentSession.outputNames[0]]
       const valueOutput = outputs.value ?? outputs[currentSession.outputNames[1]]
@@ -256,14 +275,19 @@ export function useAI({
 
       setSuggestion(result.suggestion)
       setValue(scoreValue)
-      setThinking(false)
       return result.suggestion
     } catch (cause) {
+      if (id !== requestId.current) {
+        return null
+      }
       setSuggestion(null)
       setValue(null)
-      setThinking(false)
       setRuntimeError(cause instanceof Error ? cause.message : String(cause))
       return null
+    } finally {
+      if (id === requestId.current) {
+        setThinking(false)
+      }
     }
   }
 

@@ -22,7 +22,8 @@ class ReplayBuffer:
     def sample(self, batch_size: int):
         if len(self.buffer) == 0:
             return [], [], []
-        batch = random.sample(self.buffer, min(batch_size, len(self.buffer)))
+        # Python 3.12 random.sample requires a sequence; deque is not one.
+        batch = random.sample(list(self.buffer), min(batch_size, len(self.buffer)))
         states, policies, values = zip(*batch)
         return list(states), list(policies), list(values)
 

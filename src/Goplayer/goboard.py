@@ -462,12 +462,13 @@ class GoBoard(QWidget):
         black_score = result["black_score"]
         white_score = result["white_score"]
         winner = result["winner"]
+        outcome = "和棋" if winner == "draw" else f"{self._color_label(winner)}获胜"
 
         print(f"黑子得分：{black_score:.1f}，白子得分：{white_score:.1f}")
         print(f"胜者：{winner}")
         QMessageBox.information(
             self,
             "比赛结果",
-            f"黑子得分：{black_score:.1f}，白子得分：{white_score:.1f}\n胜者：{winner}",
+            f"黑子得分：{black_score:.1f}，白子得分：{white_score:.1f}\n{outcome}",
         )
         return winner

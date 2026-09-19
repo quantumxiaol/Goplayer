@@ -36,7 +36,7 @@
 | 随机对弈 / 双 AI 观战 | 无 | 支持 |
 | 自博弈训练 | 无 | PyTorch 策略 / 价值双头网络 |
 
-13 / 19 路目前还没有训完，页面会显示“未训练”。项目定位为学习与实验，尚未提供棋力评级或标准对局评测。
+13 / 19 路目前还没有训完，页面会显示“未训练”。项目定位为学习与实验，尚未提供棋力评级；训练脚本提供项目内部模型的交换执色评测。
 
 ## 快速开始
 
@@ -107,81 +107,117 @@ uv run --extra gui --extra rl python ItisMyGo.py
 
 ## 训练与模型导出
 
-### 1. 安装训练依赖
+### 在实验室 GPU 机器上运行
+
+提供一份 [13 路实验配置](configs/train-13x13.json)，用于验证新的训练逻辑。以下命令在实验室机器上执行；这组参数尚未经过完整训练验证，不代表已解决棋力或收敛问题。
 
 ```bash
 uv sync --extra rl
+uv run --extra rl python scripts/train.py \
+  --config configs/train-13x13.json \
+  --run-name bs13_probe_v2 --iterations 10
 ```
 
-### 2. 验证训练流程
-
-以下配置仅用于快速检查自博弈、反向传播和权重保存，不用于评估棋力。独立输出目录可避免覆盖已有模型：
+先检查这 10 轮的终局、更新次数与第一次对局评测，再决定是否开始长实验。配置强制使用 CUDA；若当前 PyTorch 无法使用 CUDA，脚本会报错，需要先配置实验室环境。
 
 ```bash
 uv run --extra rl python scripts/train.py \
-  --board-size 9 --iterations 1 \
-  --games-per-iteration 1 --num-simulations 2 \
-  --max-moves 6 --batch-size 2 \
-  --train-steps-per-iteration 1 --save-interval 1 \
-  --device cpu --checkpoint-dir checkpoints/smoke \
-  --log-dir logs/smoke --run-name smoke --no-tensorboard
+  --config configs/train-13x13.json --run-name bs13_v2
 ```
 
-### 3. 运行自博弈训练
+第二条命令默认从头训练 400 轮，是一个新实验。每次运行需使用新名称；已有实验目录会被拒绝覆盖。若要从某个权重开始新实验，可传 `--init-checkpoint <path>`：**仅加载模型权重，不恢复优化器、回放池或随机状态**，不等同于断点续训。第一次排查建议从头训练，避免继承旧模型已经形成的偏差。
 
-```bash
-uv run --extra rl python scripts/train.py \
-  --board-size 9 --iterations 200 --tensorboard
-```
+### 训练策略
 
-| 参数 | 默认值 | 作用 |
+- 自博弈根节点加入 Dirichlet 噪声，增加探索；评测和桌面对弈不加噪声。
+- 策略监督使用归一化 MCTS 访问次数；落子采样单独调整温度，避免后期低温度把训练目标也压成近似 one-hot。
+- 训练抽样时同步旋转 / 翻转棋盘与落子概率，共 8 种对称变换，Pass 概率不变。
+- 只有连续两次 Pass 的终局生成胜负标签，和棋为 `0`。达到手数上限的对局单独计为截断，整局样本丢弃，不伪造胜负。
+- 多局搜索的叶节点合并进行网络推理；搜索状态不复制 GUI 悔棋快照。规则计算仍在 CPU 串行执行，实际吞吐需在实验室测量。
+- 保留三通道输入、默认 64 通道 / 3 个残差块的网络结构。新策略需要重新产生自博弈数据并训练，现有权重不会因代码升级自动变强。
+
+| 参数 | 13 路配置 | 含义 |
 | --- | --- | --- |
-| `--games-per-iteration` | `8` | 每轮自博弈局数 |
-| `--num-simulations` | `80` | 每步 MCTS 模拟次数；增大后计算开销也增加 |
-| `--batch-size` | `128` | 回放训练批大小；样本不足时跳过更新 |
-| `--min-moves-before-pass` | `30` | 前 N 手限制 Pass；可由 `.env` 覆盖 |
-| `--save-interval` | `10` | 每 N 轮保存模型 |
-| `--device` | `auto` | `auto / cpu / cuda / mps`；可由 `.env` 覆盖 |
-| `--run-name` | 时间戳 | 区分训练日志目录 |
+| `games_per_iteration` | 32 | 每轮自博弈局数 |
+| `self_play_batch_size` | 16 | 同时推进的对局数，影响推理批大小 |
+| `num_simulations` | 320 | 每步搜索预算，首次模拟用于展开根节点 |
+| `batch_size` | 256 | 梯度更新时的回放样本批大小 |
+| `train_steps_per_iteration` | 20 | 每轮梯度更新次数；样本不足时跳过 |
+| `temperature_moves` / `final_temperature` | 80 / 0.25 | 前 80 手温度为 1，之后降低采样温度 |
+| `min_moves_before_pass` / `max_moves` | 100 / 676 | 前 100 手限制 Pass；无合法落点时仍允许 Pass |
+| `dirichlet_alpha` / `noise_fraction` | 0.06 / 0.25 | 根节点探索噪声参数 |
+| `eval_interval` / `eval_games` | 10 / 20 | 每 10 轮分别对固定参考模型和当前最佳模型各评测 20 局 |
 
-完整参数：`uv run --extra rl python scripts/train.py --help`。
+配置优先级为 **命令行 > JSON > 支持的环境变量 > 内置默认值**。不使用 JSON 时，9 / 13 / 19 路的搜索预算分别为 160 / 320 / 640，温度切换手数为 40 / 80 / 120，Pass 限制手数为 50 / 100 / 180。完整参数：
 
-输出结构：
+```bash
+uv run --extra rl python scripts/train.py --help
+```
+
+13 路仍使用项目原有的 **2.0 目**贴目；整数贴目可能产生和棋。可用 `--komi` 单独开展对照实验，但训练、评测和最终使用模型时应采用相同贴目。网页和桌面默认贴目不会随训练参数自动改变。
+
+### 模型选择与实验记录
+
+评测采用固定随机种子的成对开局，每个开局交换候选模型的执色，不加探索噪声，按最大访问概率落子。和棋计半分；当全部评测局正常终局且候选模型对当前最佳模型的得分率达到 55%，才更新 `best_model.pth`。20 局只能粗略筛选；要确认提升，应增加评测局数（例如 `--eval-games 100`）并用其他开局复测。
 
 ```text
-checkpoints/9x9/
-├── model_v10.pth
-└── best_model.pth
-logs/9x9/<run_name>/
+checkpoints/13x13/<run_name>/
+├── reference_model.pth    # 固定参考，默认是本轮实验的初始模型
+├── best_model.pth         # 初始为基线；通过交换执色评测后才更新
+├── latest_model.pth       # 最近一次保存的训练模型
+└── model_v10.pth          # 按保存间隔留存的模型
+logs/13x13/<run_name>/
+├── run_config.json        # 最终参数、Git 版本、设备与 PyTorch 版本
 ├── train_metrics.csv
-└── events.out.tfevents.*   # 启用 TensorBoard 时生成
+├── selfplay_games.jsonl
+├── evaluation.jsonl       # 对参考 / 最佳模型的成绩，含黑白分项
+├── evaluation_games.jsonl # 每局终止原因与分数
+└── events.out.tfevents.*  # 启用 TensorBoard 时生成
 ```
 
-`--checkpoint-dir` 与 `--log-dir` 都是根目录，脚本会自动追加棋盘尺寸。`best_model.pth` 根据保存轮次的平均训练损失选取，未经过对局胜率选拔；相同权重目录中的同名文件会被后续训练覆盖，`--run-name` 只隔离日志。
+`--checkpoint-dir`、`--log-dir` 是根目录，都会追加棋盘尺寸和运行名称。固定参考不会随晋级更新，可通过 `--eval-opponent <path>` 指定兼容的旧模型；否则“击败参考模型”仅表示击败实验初始模型，不是棋力评级。
+
+排查“一边倒”时重点看：
+
+| 记录 | 如何使用 |
+| --- | --- |
+| `truncation_rate`、`completed` | 截断超过 25% 会告警；大量未终局样本被丢弃，应先检查终局与手数上限 |
+| `buffer`、`optimizer_steps` | 更新次数为 0 表示尚未满足训练批大小，loss 空值不是 loss 为 0 |
+| `black_score_rate`、`mean_score_diff_completed` | 只统计正常终局；不能要求自博弈黑白胜率必然各 50% |
+| `mean_policy_entropy`、`mean_policy_max` | 结合棋局长度观察策略是否过早集中到少数落点 |
+| `mean_root_value_black` / `white` | 分别观察当前执子方价值是否长期饱和 |
+| 评测的 `score_as_black` / `score_as_white` | 检查提升是否只发生在一种执色；同时看截断数，避免误读总体得分 |
+| `positions_per_second` | 自博弈实际落子吞吐，含规则与搜索耗时，不是神经网络每秒推理次数 |
 
 ```bash
 uv run --extra rl tensorboard --logdir logs
 ```
 
-训练配置还可通过 `.env` 中的 `RL_DEVICE`、`RL_CHECKPOINT_DIR`、`RL_LOG_DIR`、`RL_RUN_NAME`、`RL_TENSORBOARD` 和 `RL_MIN_MOVES_BEFORE_PASS` 设置，命令行参数优先。桌面版使用 `ALPHAZERO_CHECKPOINT_DIR`、`ALPHAZERO_CHECKPOINT_PATH` 与 `ALPHAZERO_MIN_MOVES_BEFORE_PASS`，详见 [.env.template](.env.template)。
+环境变量及桌面权重设置见 [.env.template](.env.template)。使用新实验的桌面模型时显式设置：
 
-### 4. 导出到浏览器
+```dotenv
+ALPHAZERO_CHECKPOINT_PATH="checkpoints/13x13/bs13_v2/best_model.pth"
+```
+
+### 导出到浏览器
+
+确认候选模型通过评测后再导出：
 
 ```bash
 uv run --extra rl python scripts/export_onnx.py \
-  --checkpoint checkpoints/9x9/best_model.pth
+  --checkpoint checkpoints/13x13/bs13_v2/best_model.pth
 ```
 
-默认生成 `frontend/public/models/9x9/goplayer_v1.onnx` 和同名 `.json` 元数据，导出时会执行 ONNX 格式检查。如果训练使用了自定义网络宽度或深度，导出时需要传入匹配的 `--num-channels` 和 `--num-res-blocks`。
+生成 `frontend/public/models/13x13/goplayer_v1.onnx` 和同名 `.json` 元数据，导出时执行 ONNX 格式检查。如果训练使用了自定义网络宽度或深度，导出时需要传入匹配的 `--num-channels` 和 `--num-res-blocks`。
 
-不同棋盘尺寸需要分别训练。导出 13 / 19 路模型后，还需要修改 [modelConfig.ts](frontend/src/game/modelConfig.ts) 中对应尺寸的 `trained`、`modelPath` 和说明文字，前端才会启用 AI 按钮。
+不同棋盘尺寸需要分别训练。导出 13 / 19 路模型后，还需要修改 [modelConfig.ts](frontend/src/game/modelConfig.ts) 中对应尺寸的 `trained`、`modelPath` 和说明文字，前端才会启用 AI 按钮。网页仅使用策略网络单步推理，实际表现需要另外检验。
 
 ## 规则与限制
 
 - 落子后先提掉无气敌块，再判断己方是否有气；禁止自杀着。
 - 使用棋盘历史签名检查 **Positional Superko（全局同形禁着）**。
 - 连续两次 Pass 终局，按盘上棋子与单色围住的空点进行面积计分。不会自动识别或移除死子，应先完成争议区域的对弈。
-- 默认白方贴目：9 路 **5.5**、13 路 **2.0**、19 路 **7.5**。
+- 默认白方贴目：9 路 **5.5**、13 路 **2.0**、19 路 **7.5**；同分判和棋。
 - 网页 AI 使用策略网络单次推理，不含 MCTS。界面的“置信度”是合法候选着法中的策略概率，不代表胜率；价值输出也未经棋力校准。
 - 网页对局保存在内存中，刷新页面会丢失，尚无棋谱导入 / 导出与在线联机功能。
 
@@ -192,8 +228,9 @@ uv run --extra rl python scripts/export_onnx.py \
 ```text
 ItisMyGo.py               桌面版入口
 src/Goplayer/            Python 规则环境、棋盘与棋手
-src/rl/                  编码器、策略价值网络、MCTS、回放缓冲
-scripts/train.py         自博弈训练
+src/rl/                  编码器、网络、批量 MCTS、自博弈 / 评测、数据增强、回放缓冲
+configs/train-13x13.json  13 路 GPU 实验配置
+scripts/train.py         自博弈训练与实验记录
 scripts/export_onnx.py   模型导出
 frontend/src/            React 页面、Canvas 棋盘、TypeScript 规则引擎
 frontend/public/models/ 浏览器模型与元数据
@@ -218,4 +255,4 @@ Python（在项目根目录运行，需要 GUI 与训练依赖）：
 uv run --extra gui --extra rl python -m unittest discover -s tests -v
 ```
 
-测试覆盖 Pass 悔棋、API 坐标转换、MCTS 合法动作、Qt 工作线程生命周期，以及网页端重开 / 切盘 / 悔棋时的过期 AI 请求。外部 API 使用模拟响应，测试不会请求真实服务。
+测试覆盖规则与和棋、API 坐标转换、Qt 线程、网页过期 AI 请求，以及根节点噪声、批量搜索、策略目标、数据对称变换、回放抽样、截断标签和成对评测。训练策略测试使用固定局面或预设策略，不调用训练循环或优化器更新；外部 API 使用模拟响应。

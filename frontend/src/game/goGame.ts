@@ -29,7 +29,7 @@ export interface GoMove {
 export interface ScoreSummary {
   blackScore: number
   whiteScore: number
-  winner: StoneColor
+  winner: StoneColor | 'draw'
 }
 
 export interface PlayResult {
@@ -436,7 +436,7 @@ export class GoGame {
     return {
       blackScore,
       whiteScore,
-      winner: blackScore > whiteScore ? 'black' : 'white',
+      winner: blackScore === whiteScore ? 'draw' : blackScore > whiteScore ? 'black' : 'white',
     }
   }
 

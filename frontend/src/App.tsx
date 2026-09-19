@@ -16,6 +16,7 @@ const PLAYER_LABEL: Record<StoneColor, string> = {
   black: '黑棋',
   white: '白棋',
 }
+const RESULT_LABEL = { black: '黑棋胜', white: '白棋胜', draw: '和棋' }
 
 const MOVE_ERROR_TEXT: Record<MoveError, string> = {
   game_over: '对局已经结束，先重开或悔棋再继续。',
@@ -104,7 +105,7 @@ function App() {
       const finalScore = nextGame.calculateAreaScore()
       replaceGame(
         nextGame,
-        `${getMoveSummary(nextGame, lastMove)}。终局：${PLAYER_LABEL[finalScore.winner]}胜，黑 ${finalScore.blackScore.toFixed(
+        `${getMoveSummary(nextGame, lastMove)}。终局：${RESULT_LABEL[finalScore.winner]}，黑 ${finalScore.blackScore.toFixed(
           1,
         )} : 白 ${finalScore.whiteScore.toFixed(1)}。`,
       )
@@ -131,7 +132,7 @@ function App() {
       const finalScore = nextGame.calculateAreaScore()
       replaceGame(
         nextGame,
-        `双方连续停一手，终局。${PLAYER_LABEL[finalScore.winner]}胜，黑 ${finalScore.blackScore.toFixed(
+        `双方连续停一手，终局。${RESULT_LABEL[finalScore.winner]}，黑 ${finalScore.blackScore.toFixed(
           1,
         )} : 白 ${finalScore.whiteScore.toFixed(1)}。`,
       )

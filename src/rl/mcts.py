@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import math
 from typing import Dict, Tuple
 
@@ -31,6 +30,25 @@ def index_to_action(index: int, board_size: int) -> Tuple[int, int]:
     if index == board_size * board_size:
         return PASS_MOVE
     return index // board_size, index % board_size
+
+
+def temperature_policy(policy, temperature):
+    """Transform a copy for move sampling; never mutate the training target."""
+    if not np.isfinite(temperature) or temperature < 0:
+        raise ValueError("temperature must be finite and nonnegative")
+    policy = np.asarray(policy, dtype=np.float64)
+    if not np.isfinite(policy).all() or np.any(policy < 0) or policy.sum() <= 0:
+        raise ValueError("policy must be a finite, nonnegative distribution")
+    if temperature <= 1e-6:
+        result = np.zeros_like(policy)
+        result[np.argmax(policy)] = 1.0
+    else:
+        positive = policy > 0
+        logits = np.log(policy[positive]) / temperature
+        result = np.zeros_like(policy)
+        result[positive] = np.exp(logits - logits.max())
+        result /= result.sum()
+    return result.astype(np.float32)
 
 
 class MCTSNode:
@@ -74,14 +92,14 @@ class MCTS:
         if self.num_simulations < 1:
             raise ValueError("num_simulations must be at least 1")
 
-    def _evaluate_policy_value(self, env, current_color: str, device):
-        state = encode_state(env, current_color).unsqueeze(0).to(device)
+    def _evaluate_batch(self, environments, colors, device):
+        states = torch.stack([encode_state(env, color) for env, color in zip(environments, colors)]).to(device)
         self.model.eval()
-        with torch.no_grad():
-            policy_logits, value = self.model(state)
-            policy = torch.softmax(policy_logits, dim=1).squeeze(0).cpu().numpy()
-            value_scalar = float(value.item())
-        return policy, value_scalar
+        with torch.inference_mode():
+            logits, values = self.model(states)
+            policies = torch.softmax(logits, dim=1).cpu().numpy()
+            values = values.flatten().cpu().numpy()
+        return list(zip(policies, values))
 
     def _legal_actions(self, env, current_color: str, allow_pass: bool = True):
         legal_moves = env.legal_moves(current_color)
@@ -89,9 +107,9 @@ class MCTS:
             return legal_moves + [PASS_MOVE]
         return legal_moves
 
-    def _expand(self, node: MCTSNode, env, current_color: str, device, allow_pass: bool = True):
+    def _expand(self, node: MCTSNode, env, current_color: str, prediction, allow_pass: bool = True):
         legal_actions = self._legal_actions(env, current_color, allow_pass=allow_pass)
-        policy, value = self._evaluate_policy_value(env, current_color, device)
+        policy, value = prediction
 
         action_size = env.size * env.size + 1
         mask = np.zeros(action_size, dtype=np.float32)
@@ -130,11 +148,12 @@ class MCTS:
             return
         row, col = action
         if not env.place_stone(row, col, current_color):
-            # Should be rare because actions are legal by construction.
-            env.register_pass(current_color)
+            raise RuntimeError(f"MCTS selected an illegal move: {action}")
 
     def _terminal_value(self, env, current_color: str) -> float:
         black_score, white_score = env.calculate_area_score()
+        if black_score == white_score:
+            return 0.0
         winner = "black" if black_score > white_score else "white"
         return 1.0 if winner == current_color else -1.0
 
@@ -145,80 +164,86 @@ class MCTS:
             node.value_sum += value
             value = -value
 
-    def get_action_probs(
-        self,
-        root_env,
-        current_color: str,
-        temperature: float = 1.0,
-        device="cpu",
-        allow_pass: bool = True,
-    ):
-        if root_env.game_over:
-            raise ValueError("Cannot search a finished game")
-        root = MCTSNode()
+    @staticmethod
+    def _add_root_noise(root, alpha, fraction, rng):
+        if not 0 <= fraction <= 1 or alpha <= 0:
+            raise ValueError("Root noise requires alpha > 0 and fraction in [0, 1]")
+        if fraction == 0:
+            return
+        noise = rng.dirichlet(np.full(len(root.children), alpha))
+        for child, sample in zip(root.children.values(), noise):
+            child.prior_prob = (1 - fraction) * child.prior_prob + fraction * float(sample)
 
-        for _ in range(self.num_simulations):
-            node = root
-            env = copy.deepcopy(root_env)
-            player = current_color
-            search_path = [node]
-
-            while node.is_expanded():
-                action, child = self._select_child(node)
-                if child is None:
-                    break
-                self._apply_action(env, action, player)
-                node = child
-                search_path.append(node)
-                player = other_color(player)
-                if env.game_over:
-                    break
-
-            if env.game_over:
-                leaf_value = self._terminal_value(env, player)
-            else:
-                leaf_value = self._expand(node, env, player, device, allow_pass=allow_pass)
-            self._backpropagate(search_path, leaf_value)
-
-        action_size = root_env.size * root_env.size + 1
-        visit_counts = np.zeros(action_size, dtype=np.float32)
+    @staticmethod
+    def _root_policy(root, size):
+        counts = np.zeros(size * size + 1, dtype=np.float32)
         for action, child in root.children.items():
-            visit_counts[action_to_index(action, root_env.size)] = float(child.visit_count)
-
-        if visit_counts.sum() <= 0:
-            # One simulation expands only the root. Use its legal priors rather
-            # than assigning probability to occupied points or forbidden Pass.
+            counts[action_to_index(action, size)] = child.visit_count
+        if counts.sum() <= 0:
             for action, child in root.children.items():
-                visit_counts[action_to_index(action, root_env.size)] = child.prior_prob
-            if visit_counts.sum() <= 0:
-                for action in root.children:
-                    visit_counts[action_to_index(action, root_env.size)] = 1.0
+                counts[action_to_index(action, size)] = child.prior_prob
+        if counts.sum() <= 0 or not np.isfinite(counts).all():
+            raise RuntimeError("Search produced no finite legal policy")
+        return counts / counts.sum()
 
-        def _argmax_one_hot():
-            probs = np.zeros_like(visit_counts, dtype=np.float32)
-            probs[int(np.argmax(visit_counts))] = 1.0
-            return probs
+    def get_action_probs_batch(
+        self, root_envs, current_colors, temperature=1.0, device="cpu",
+        allow_pass=True, add_root_noise=False, dirichlet_alpha=0.1,
+        noise_fraction=0.25, rng=None, min_moves_before_pass=0,
+    ):
+        """Search independent games together; one GPU forward per simulation round.
 
-        if temperature <= 1e-6:
-            return _argmax_one_hot()
+        Temperature=1 preserves normalized visit counts for policy supervision.
+        Exploration noise is opt-in, so GUI/evaluation searches remain unchanged.
+        """
+        if not root_envs or len(root_envs) != len(current_colors):
+            raise ValueError("Provide equally sized, non-empty positions and colors")
+        if any(env.game_over for env in root_envs):
+            raise ValueError("Cannot search a finished game")
+        if len({env.size for env in root_envs}) != 1:
+            raise ValueError("Batched positions must have the same board size")
+        rng = rng if rng is not None else np.random.default_rng()
+        roots = [MCTSNode() for _ in root_envs]
+        for _ in range(self.num_simulations):
+            pending = []
+            for root, root_env, color in zip(roots, root_envs, current_colors):
+                env = root_env.clone_for_search()
+                node, player, path = root, color, [root]
+                while node.is_expanded():
+                    action, child = self._select_child(node)
+                    self._apply_action(env, action, player)
+                    node = child
+                    path.append(node)
+                    player = other_color(player)
+                    if env.game_over:
+                        break
+                if env.game_over:
+                    self._backpropagate(path, self._terminal_value(env, player))
+                else:
+                    pending.append((root, node, env, player, path))
+            if not pending:
+                continue
+            predictions = self._evaluate_batch(
+                [item[2] for item in pending], [item[3] for item in pending], device,
+            )
+            for (root, node, env, player, path), prediction in zip(pending, predictions):
+                leaf_allow_pass = allow_pass and len(env.moves_history) >= min_moves_before_pass
+                value = self._expand(node, env, player, prediction, leaf_allow_pass)
+                if node is root and add_root_noise:
+                    self._add_root_noise(root, dirichlet_alpha, noise_fraction, rng)
+                self._backpropagate(path, float(value))
+        self.last_root_values = [root.q_value for root in roots]
+        return [temperature_policy(self._root_policy(root, env.size), temperature)
+                for root, env in zip(roots, root_envs)]
 
-        positive_mask = visit_counts > 0
-        # Use log-space temperature scaling to avoid overflow when temperature is very small.
-        logits = np.full(action_size, -np.inf, dtype=np.float64)
-        logits[positive_mask] = np.log(visit_counts[positive_mask]) / float(temperature)
-
-        max_logit = np.max(logits[positive_mask])
-        adjusted = np.zeros(action_size, dtype=np.float64)
-        adjusted[positive_mask] = np.exp(logits[positive_mask] - max_logit)
-
-        adjusted_sum = float(adjusted.sum())
-        if not np.isfinite(adjusted_sum) or adjusted_sum <= 1e-12:
-            return _argmax_one_hot()
-
-        probs = (adjusted / adjusted_sum).astype(np.float32)
-        if not np.all(np.isfinite(probs)):
-            return _argmax_one_hot()
-        return probs
+    def get_action_probs(
+        self, root_env, current_color, temperature=1.0, device="cpu",
+        allow_pass=True, **search_options,
+    ):
+        return self.get_action_probs_batch(
+            [root_env], [current_color], temperature=temperature, device=device,
+            allow_pass=allow_pass, **search_options,
+        )[0]
 
     def get_action(
         self,

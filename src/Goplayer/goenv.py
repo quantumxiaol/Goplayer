@@ -8,9 +8,10 @@ class GoEnv:
     - 只管理棋盘状态、规则判定、终局与计分
     """
 
-    def __init__(self, size=19):
+    def __init__(self, size=19, komi=None, record_history=True):
         self.size = size
-        self.komi = self._default_komi(size)
+        self.komi = self._default_komi(size) if komi is None else float(komi)
+        self.record_history = record_history
         self.reset()
 
     @staticmethod
@@ -32,6 +33,17 @@ class GoEnv:
         self.position_history = {self.board_signature()}
         self.consecutive_passes = 0
         self.game_over = False
+
+    def clone_for_search(self):
+        """Copy rule state without copying the GUI's growing undo snapshots."""
+        clone = GoEnv(self.size, self.komi, record_history=False)
+        clone.grid = [row[:] for row in self.grid]
+        clone.captures = self.captures.copy()
+        clone.moves_history = self.moves_history.copy()
+        clone.position_history = self.position_history.copy()
+        clone.consecutive_passes = self.consecutive_passes
+        clone.game_over = self.game_over
+        return clone
 
     def board_signature(self, grid=None):
         return serialize_grid(self.grid if grid is None else grid)
@@ -108,7 +120,7 @@ class GoEnv:
 
         old_grid = [line[:] for line in self.grid]
         old_captures = self.captures.copy()
-        old_history = set(self.position_history)
+        old_history = set(self.position_history) if self.record_history else None
         old_consecutive_passes = self.consecutive_passes
         old_game_over = self.game_over
 
@@ -128,15 +140,16 @@ class GoEnv:
             self.captures = old_captures
             return False
 
-        self.undo_stack.append(
-            {
-                "grid": old_grid,
-                "captures": old_captures,
-                "position_history": old_history,
-                "consecutive_passes": old_consecutive_passes,
-                "game_over": old_game_over,
-            }
-        )
+        if self.record_history:
+            self.undo_stack.append(
+                {
+                    "grid": old_grid,
+                    "captures": old_captures,
+                    "position_history": old_history,
+                    "consecutive_passes": old_consecutive_passes,
+                    "game_over": old_game_over,
+                }
+            )
         self.position_history.add(next_signature)
         self.moves_history.append((row, col, color))
         self.consecutive_passes = 0
@@ -148,13 +161,14 @@ class GoEnv:
         if color is None:
             previous_color = self.moves_history[-1][2] if self.moves_history else "white"
             color = "white" if previous_color == "black" else "black"
-        self.undo_stack.append({
-            "grid": [line[:] for line in self.grid],
-            "captures": self.captures.copy(),
-            "position_history": set(self.position_history),
-            "consecutive_passes": self.consecutive_passes,
-            "game_over": self.game_over,
-        })
+        if self.record_history:
+            self.undo_stack.append({
+                "grid": [line[:] for line in self.grid],
+                "captures": self.captures.copy(),
+                "position_history": set(self.position_history),
+                "consecutive_passes": self.consecutive_passes,
+                "game_over": self.game_over,
+            })
         self.moves_history.append((-1, -1, color))
         self.consecutive_passes += 1
         if self.consecutive_passes >= 2:
@@ -221,7 +235,7 @@ class GoEnv:
     def judge_winner(self):
         self.game_over = True
         black_score, white_score = self.calculate_area_score()
-        winner = "black" if black_score > white_score else "white"
+        winner = "draw" if black_score == white_score else ("black" if black_score > white_score else "white")
         return {
             "black_score": black_score,
             "white_score": white_score,

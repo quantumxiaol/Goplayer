@@ -7,7 +7,12 @@ const runtime = vi.hoisted(() => ({ create: vi.fn() }))
 vi.mock('onnxruntime-web/wasm', () => ({
   env: { wasm: {} },
   InferenceSession: { create: runtime.create },
-  Tensor: class {},
+  Tensor: class {
+    type: string; data: Float32Array; dims: number[]
+    constructor(type: string, data: Float32Array, dims: number[]) {
+      this.type = type; this.data = data; this.dims = dims
+    }
+  },
 }))
 // Keep the real App and AI hook; Canvas drawing is unrelated to request races.
 vi.mock('../src/components/GoBoardCanvas', () => ({
@@ -31,6 +36,7 @@ function outputs(index = 80) {
 
 function session() {
   return {
+    inputMetadata: [{ isTensor: true, shape: [1, 3, 9, 9] }],
     inputNames: ['board_state'], outputNames: ['policy_logits', 'value'],
     run: vi.fn().mockResolvedValue(outputs()),
     release: vi.fn().mockResolvedValue(undefined),
@@ -50,6 +56,29 @@ describe('AI request lifetime', () => {
     click('AI 建议')
     await waitFor(() => expect(notice()).toContain('J1'))
     expect(document.querySelector('.ai-suggestion')?.textContent).toContain('J1')
+  })
+
+  it('feeds the pass plane to a four-channel model after Pass', async () => {
+    const model = session()
+    model.inputMetadata[0].shape[1] = 4
+    runtime.create.mockResolvedValue(model)
+    render(<App />)
+    click('Pass')
+    click('AI 建议')
+    await waitFor(() => expect(model.run).toHaveBeenCalledOnce())
+    const tensor = model.run.mock.calls[0][0].board_state
+    expect(tensor.dims).toEqual([1, 4, 9, 9])
+    expect(Array.from(tensor.data.slice(243))).toEqual(Array(81).fill(1))
+  })
+
+  it('rejects an unsupported input shape before inference', async () => {
+    const model = session()
+    model.inputMetadata[0].shape[1] = 5
+    runtime.create.mockResolvedValue(model)
+    render(<App />)
+    click('AI 建议')
+    await waitFor(() => expect(document.querySelector('.ai-error')?.textContent).toContain('模型输入版本'))
+    expect(model.run).not.toHaveBeenCalled()
   })
 
   it.each(['重开', '13 x 13', 'Pass', '测试落子', '悔棋'])(

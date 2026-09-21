@@ -18,7 +18,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from dotenv import load_dotenv
 
 try:
@@ -31,7 +30,10 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from Goplayer.goenv import GoEnv
-from rl.augmentation import transform_sample
+from rl.checkpoints import unpack_checkpoint
+from rl.data_archive import GameArchive, load_archive, game_sgf
+from rl.encoder import FEATURE_CHANNELS
+from rl.learning import LOSS_KEYS, update_model, validate_model
 from rl.net import GoNet
 from rl.replay_buffer import ReplayBuffer
 from rl.selfplay import SearchConfig, evaluate_models, play_self_play_batch, should_promote
@@ -48,7 +50,8 @@ METRIC_FIELDS = [
     "truncated", "truncation_rate", "black_score_rate", "mean_moves", "pass_rate",
     "mean_first_pass_ply", "mean_score_diff_completed", "mean_policy_entropy", "mean_policy_max",
     "mean_root_value_black", "mean_root_value_white", "selfplay_seconds", "positions_per_second",
-    "optimizer_steps", "total_loss", "policy_loss", "value_loss",
+    "optimizer_steps", *LOSS_KEYS, "validation_samples",
+    *(f"val_{key}" for key in LOSS_KEYS),
     "reference_score", "champion_score", "promoted",
 ]
 
@@ -87,12 +90,13 @@ def append_json(path, record):
 
 def load_model_weights(model, path, board_size, komi):
     payload = load_checkpoint(path, map_location="cpu")
-    metadata = payload.get("metadata", {})
-    if metadata.get("board_size", board_size) != board_size:
+    state, metadata, spec = unpack_checkpoint(payload)
+    if spec["input_features"] != model.input_features:
+        raise ValueError("Input version mismatch: stones-v1 and pass-v2 weights cannot be interchanged")
+    if spec["board_size"] != board_size:
         raise ValueError(f"Checkpoint board size does not match {board_size}: {path}")
     if "komi" in metadata and metadata["komi"] != komi:
         raise ValueError(f"Checkpoint komi does not match {komi}: {path}")
-    state = payload.get("model_state_dict", payload.get("state_dict", payload))
     model.load_state_dict(state, strict=True)
 
 
@@ -113,7 +117,7 @@ class Trainer:
         self.log_dir = Path(args.log_dir) / f"{args.board_size}x{args.board_size}" / self.run_name
         if self.checkpoint_dir.exists() or self.log_dir.exists():
             raise FileExistsError("Run directory already exists; choose a new --run-name to avoid overwriting an experiment")
-        self.model = GoNet(args.board_size, args.channels, args.res_blocks).to(self.device)
+        self.model = GoNet(args.board_size, args.channels, args.res_blocks, args.input_features).to(self.device)
         if args.init_checkpoint:
             load_model_weights(self.model, args.init_checkpoint, args.board_size, args.komi)
         self.reference = copy.deepcopy(self.model).eval()
@@ -123,8 +127,14 @@ class Trainer:
         self.champion = copy.deepcopy(self.model).eval()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=args.learning_rate, weight_decay=1e-4)
         self.buffer = ReplayBuffer(args.buffer_size)
+        self.validation_buffer = ReplayBuffer(args.validation_buffer_size)
+        if args.replay_dir:
+            load_archive(args.replay_dir, self.buffer, self.validation_buffer,
+                         args.board_size, args.komi, args.input_features)
         self.checkpoint_dir.mkdir(parents=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.archive = GameArchive(self.log_dir / "data", args.board_size, args.komi,
+                                   args.input_features, args.seed, args.validation_fraction)
         config = {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()}
         config.update(run_name=self.run_name, resolved_device=str(self.device), torch_version=str(torch.__version__))
         try:
@@ -138,6 +148,7 @@ class Trainer:
         with self.metrics_path.open("w", newline="") as stream:
             csv.DictWriter(stream, fieldnames=METRIC_FIELDS).writeheader()
         self.writer = SummaryWriter(str(self.log_dir)) if args.tensorboard and SummaryWriter else None
+        self.save_model("initial_model.pth", 0, self.model, selection="initial_weights")
         self.save_model("reference_model.pth", 0, self.reference, selection="fixed_reference")
         self.save_model("best_model.pth", 0, self.champion, selection="initial_baseline")
 
@@ -150,9 +161,13 @@ class Trainer:
                 for start in range(0, self.args.games_per_iteration, self.args.self_play_batch_size):
                     count = min(self.args.self_play_batch_size, self.args.games_per_iteration - start)
                     for samples, record in play_self_play_batch(self.model, self.config, count, self.device, self.rng):
-                        self.buffer.save_game(samples)
+                        game = len(records) + 1
+                        split, game_id = self.archive.save_game(iteration, game, samples, record)
+                        target = self.buffer if split == "train" else self.validation_buffer
+                        target.save_game(samples)
                         records.append(record)
-                        append_json(self.log_dir / "selfplay_games.jsonl", dict(record, iteration=iteration, game=len(records)))
+                        append_json(self.log_dir / "selfplay_games.jsonl",
+                                    dict(record, iteration=iteration, game=game, game_id=game_id, split=split))
                 seconds = time.perf_counter() - started
                 metrics = summarize_games(records)
                 losses = []
@@ -163,9 +178,8 @@ class Trainer:
                     "iteration": iteration, "buffer": len(self.buffer), "selfplay_seconds": seconds,
                     "positions_per_second": sum(r["moves"] for r in records) / max(seconds, 1e-9),
                     "optimizer_steps": len(losses),
-                    "total_loss": mean_or_none([loss["total"] for loss in losses]),
-                    "policy_loss": mean_or_none([loss["policy"] for loss in losses]),
-                    "value_loss": mean_or_none([loss["value"] for loss in losses]),
+                    **{key: mean_or_none([loss[key] for loss in losses]) for key in LOSS_KEYS},
+                    **validate_model(self.model, list(self.validation_buffer.buffer), self.device, self.args.batch_size),
                     "reference_score": None, "champion_score": None, "promoted": False,
                 })
                 if iteration % self.args.eval_interval == 0:
@@ -180,8 +194,12 @@ class Trainer:
                         evaluations[name] = summary
                         metrics[f"{name}_score"] = summary["score"]
                         append_json(self.log_dir / "evaluation.jsonl", dict(iteration=iteration, opponent=name, **summary))
-                        for game in games:
-                            append_json(self.log_dir / "evaluation_games.jsonl", dict(game, iteration=iteration, opponent=name))
+                        sgf_dir = self.log_dir / "evaluation_sgf"
+                        sgf_dir.mkdir(exist_ok=True)
+                        for number, game in enumerate(games, 1):
+                            append_json(self.log_dir / "evaluation_games.jsonl",
+                                        dict(game, iteration=iteration, opponent=name, game=number))
+                            (sgf_dir / f"iter-{iteration:06d}-{name}-{number:04d}.sgf").write_text(game_sgf(game))
                     if should_promote(evaluations["champion"], self.args.promotion_threshold):
                         self.champion.load_state_dict(self.model.state_dict())
                         metrics["promoted"] = True
@@ -203,32 +221,20 @@ class Trainer:
                       f"positions/s={metrics['positions_per_second']:.2f}", flush=True)
                 if metrics["truncation_rate"] > 0.25:
                     print("WARNING: >25% of games hit the move cap and were discarded; inspect games before extending training.", flush=True)
+                if metrics["validation_samples"] == 0:
+                    print("WARNING: No completed held-out games yet; validation metrics are empty.", flush=True)
         finally:
             if self.writer:
                 self.writer.close()
 
     def train_step(self):
-        states, policies, values = self.buffer.sample(self.args.batch_size)
-        if self.args.augment:
-            transformed = [transform_sample(state, policy, random.randrange(8)) for state, policy in zip(states, policies)]
-            states, policies = zip(*transformed)
-        state_batch = torch.stack([state.float() for state in states]).to(self.device)
-        policy_batch = torch.tensor(np.stack(policies), dtype=torch.float32, device=self.device)
-        value_batch = torch.tensor(values, dtype=torch.float32, device=self.device).unsqueeze(1)
-        self.model.train()
-        policy_logits, value_preds = self.model(state_batch)
-        policy_loss = -(policy_batch * F.log_softmax(policy_logits, dim=1)).sum(dim=1).mean()
-        value_loss = F.mse_loss(value_preds, value_batch)
-        total_loss = policy_loss + value_loss
-        self.optimizer.zero_grad()
-        total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-        self.optimizer.step()
-        return {"total": float(total_loss.item()), "policy": float(policy_loss.item()), "value": float(value_loss.item())}
+        samples = list(zip(*self.buffer.sample(self.args.batch_size)))
+        return update_model(self.model, self.optimizer, samples, self.device, self.args.augment)
 
     def save_model(self, filename, iteration, model, **details):
         metadata = {
-            "format_version": 2, "iteration": iteration, "board_size": self.args.board_size,
+            "format_version": 3, "input_features": self.args.input_features,
+            "input_channels": FEATURE_CHANNELS[self.args.input_features], "iteration": iteration, "board_size": self.args.board_size,
             "komi": self.args.komi, "num_channels": self.args.channels,
             "num_res_blocks": self.args.res_blocks, "run_name": self.run_name,
             "search_config": self.config.__dict__, **details,
@@ -242,6 +248,10 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, help="JSON defaults; explicit CLI options take precedence")
     parser.add_argument("--board-size", type=int, choices=BOARD_DEFAULTS, default=9)
+    parser.add_argument("--input-features", choices=FEATURE_CHANNELS, default="stones-v1")
+    parser.add_argument("--validation-fraction", type=float, default=0.1)
+    parser.add_argument("--validation-buffer-size", type=int, default=20000)
+    parser.add_argument("--replay-dir", type=Path, help="Import saved games into a NEW run; not an exact resume")
     parser.add_argument("--komi", type=float, default=None)
     parser.add_argument("--iterations", type=int, default=200)
     parser.add_argument("--games-per-iteration", type=int, default=16)
@@ -295,7 +305,7 @@ def parse_args(argv=None):
         if value is None:
             if action.dest not in {"komi", "num_simulations", "temperature_moves", "max_moves",
                                    "min_moves_before_pass", "dirichlet_alpha", "eval_simulations",
-                                   "eval_opponent", "init_checkpoint", "run_name"}:
+                                   "eval_opponent", "init_checkpoint", "run_name", "replay_dir"}:
                 parser.error(f"{action.dest} cannot be null")
             continue
         if action.type is int and (isinstance(value, bool) or not isinstance(value, int)):
@@ -321,7 +331,7 @@ def parse_args(argv=None):
     if args.eval_simulations is None:
         args.eval_simulations = args.num_simulations
     positive = ["iterations", "games_per_iteration", "self_play_batch_size", "train_steps_per_iteration",
-                "batch_size", "buffer_size", "num_simulations", "channels", "res_blocks", "max_moves",
+                "batch_size", "buffer_size", "validation_buffer_size", "num_simulations", "channels", "res_blocks", "max_moves",
                 "save_interval", "eval_interval", "eval_games", "eval_simulations"]
     if any(getattr(args, key) <= 0 for key in positive):
         parser.error(f"These options must be positive: {', '.join(positive)}")
@@ -329,6 +339,8 @@ def parse_args(argv=None):
         parser.error("Move thresholds must be nonnegative")
     if args.min_moves_before_pass + 2 > args.max_moves or args.eval_opening_moves >= args.max_moves:
         parser.error("max_moves must allow two Pass moves after the pass threshold and exceed the opening length")
+    if not 0 < args.validation_fraction < 1:
+        parser.error("validation_fraction must be in (0, 1)")
     if args.buffer_size < args.batch_size:
         parser.error("buffer_size must be >= batch_size")
     if args.eval_games < 2 or args.eval_games % 2:

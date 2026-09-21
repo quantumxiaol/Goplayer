@@ -193,29 +193,14 @@ class AlphaZeroPlayer(GoPlayer):
             raise ImportError("PyTorch not found. Install optional deps: uv sync --extra rl")
 
         from rl.mcts import MCTS
-        from rl.net import GoNet
-        from rl.utils import get_default_device, load_checkpoint
+        from rl.checkpoints import model_from_checkpoint
+        from rl.utils import get_default_device
 
         self.device = get_default_device()
-        board_size = board.size
-        self.model = GoNet(size=board_size).to(self.device)
-
-        checkpoint_file = self._resolve_checkpoint_file(board_size)
-        if not checkpoint_file.exists():
-            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_file}")
-
-        payload = load_checkpoint(checkpoint_file, map_location=self.device)
-        state_dict, metadata = self._parse_checkpoint_payload(payload)
-        checkpoint_board_size = metadata.get("board_size")
-        if checkpoint_board_size is None:
-            checkpoint_board_size = self._infer_board_size_from_state_dict(state_dict)
-        if checkpoint_board_size is not None and int(checkpoint_board_size) != int(board_size):
-            raise ValueError(
-                f"Checkpoint board_size={checkpoint_board_size} does not match current board size={board_size}."
-            )
-
-        self.model.load_state_dict(state_dict, strict=True)
-        self.model.eval()
+        checkpoint_file = self._resolve_checkpoint_file(board.size)
+        self.model, _, _ = model_from_checkpoint(
+            checkpoint_file, self.device, board_size=board.size, komi=board.env.komi,
+        )
         self.mcts = MCTS(self.model, c_puct=self.c_puct, num_simulations=self.num_simulations)
         print(f"AlphaZeroPlayer loaded from {checkpoint_file} on {self.device}")
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as ort from 'onnxruntime-web/wasm'
 import ortWasmModuleUrl from 'onnxruntime-web/ort-wasm-simd-threaded.mjs?url'
 import ortWasmBinaryUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url'
+import { encodeBoard } from '../game/encoder'
 import type { GoGame, GoSnapshot, Point, StoneColor } from '../game/goGame'
 
 ort.env.wasm.proxy = false
@@ -44,31 +45,6 @@ export interface UseAIResult {
 }
 
 const DEFAULT_EXECUTION_PROVIDERS: ort.InferenceSession.SessionOptions['executionProviders'] = ['wasm']
-
-function encodeBoard(snapshot: GoSnapshot, playerColor: StoneColor): Float32Array {
-  const size = snapshot.size
-  const state = new Float32Array(3 * size * size)
-  const opponent = playerColor === 'black' ? 'white' : 'black'
-  const planeSize = size * size
-
-  for (let row = 0; row < size; row += 1) {
-    for (let col = 0; col < size; col += 1) {
-      const cell = snapshot.grid[row][col]
-      const offset = row * size + col
-      if (cell === playerColor) {
-        state[offset] = 1
-      } else if (cell === opponent) {
-        state[planeSize + offset] = 1
-      }
-    }
-  }
-
-  if (playerColor === 'black') {
-    state.fill(1, planeSize * 2)
-  }
-
-  return state
-}
 
 function softmax(logits: number[]): number[] {
   const maxLogit = Math.max(...logits)
@@ -244,10 +220,17 @@ export function useAI({
       if (!currentSession || id !== requestId.current) {
         return null
       }
-      const inputData = encodeBoard(snapshot, activeColor)
+      const metadata = currentSession.inputMetadata[0]
+      if (!metadata?.isTensor || metadata.shape.length !== 4 ||
+          (metadata.shape[1] !== 3 && metadata.shape[1] !== 4) ||
+          metadata.shape[2] !== snapshot.size || metadata.shape[3] !== snapshot.size) {
+        throw new Error('模型输入版本或棋盘尺寸不匹配；仅支持 stones-v1 / pass-v2。')
+      }
+      const channels = metadata.shape[1]
+      const inputData = encodeBoard(snapshot, activeColor, channels)
       const inputTensor = new ort.Tensor('float32', inputData, [
         1,
-        3,
+        channels,
         snapshot.size,
         snapshot.size,
       ])

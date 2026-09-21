@@ -18,19 +18,23 @@ def _require_rl_array_runtime() -> None:
         raise ImportError("RL dependencies are missing. Install with: uv sync --extra rl")
 
 
-def encode_state(env: Any, current_color: str):
+FEATURE_CHANNELS = {"stones-v1": 3, "pass-v2": 4}
+
+
+def encode_state(env: Any, current_color: str, input_features="stones-v1"):
     """
-    Encode GoEnv state as a tensor with shape [3, board_size, board_size].
+    Encode GoEnv as [channels, board_size, board_size]; default preserves v1.
 
     Channel layout:
     - 0: current player's stones
     - 1: opponent stones
     - 2: color indicator plane (all ones for black, all zeros for white)
+    - 3 (pass-v2 only): last move was Pass (all ones), otherwise all zeros
     """
     _require_rl_array_runtime()
 
     size = env.size
-    state = np.zeros((3, size, size), dtype=np.float32)
+    state = np.zeros((FEATURE_CHANNELS[input_features], size, size), dtype=np.float32)
     opponent = "white" if current_color == "black" else "black"
 
     for row in range(size):
@@ -43,5 +47,7 @@ def encode_state(env: Any, current_color: str):
 
     if current_color == "black":
         state[2, :, :] = 1.0
+    if input_features == "pass-v2" and env.consecutive_passes > 0:
+        state[3, :, :] = 1.0
 
     return torch.from_numpy(state)

@@ -107,6 +107,8 @@ uv run --extra gui --extra rl python ItisMyGo.py
 
 ## 训练与模型导出
 
+新增：**按局保存 SGF、终局棋盘与回放样本，固定数据的 20/80 次更新对照，以及独立的 Pass 输入实验**。具体命令、兼容约定和指标说明见 [训练实验指南](docs/training-experiments.md)。
+
 ### 在实验室 GPU 机器上运行
 
 提供一份 [13 路实验配置](configs/train-13x13.json)，用于验证新的训练逻辑。以下命令在实验室机器上执行；这组参数尚未经过完整训练验证，不代表已解决棋力或收敛问题。
@@ -115,7 +117,7 @@ uv run --extra gui --extra rl python ItisMyGo.py
 uv sync --extra rl
 uv run --extra rl python scripts/train.py \
   --config configs/train-13x13.json \
-  --run-name bs13_probe_v2 --iterations 10
+  --run-name bs13_archive_v3 --iterations 10
 ```
 
 先检查这 10 轮的终局、更新次数与第一次对局评测，再决定是否开始长实验。配置强制使用 CUDA；若当前 PyTorch 无法使用 CUDA，脚本会报错，需要先配置实验室环境。
@@ -134,7 +136,8 @@ uv run --extra rl python scripts/train.py \
 - 训练抽样时同步旋转 / 翻转棋盘与落子概率，共 8 种对称变换，Pass 概率不变。
 - 只有连续两次 Pass 的终局生成胜负标签，和棋为 `0`。达到手数上限的对局单独计为截断，整局样本丢弃，不伪造胜负。
 - 多局搜索的叶节点合并进行网络推理；搜索状态不复制 GUI 悔棋快照。规则计算仍在 CPU 串行执行，实际吞吐需在实验室测量。
-- 保留三通道输入、默认 64 通道 / 3 个残差块的网络结构。新策略需要重新产生自博弈数据并训练，现有权重不会因代码升级自动变强。
+- 默认 `stones-v1` 保留三通道输入、64 通道 / 3 个残差块；独立的 `pass-v2` 配置增加上一手 Pass 通道。旧权重与新输入版本不能混用。
+- 所有已完成批次的对局归档到磁盘；约 10% 的整局数据留作验证，其余进入训练回放池。
 
 | 参数 | 13 路配置 | 含义 |
 | --- | --- | --- |
@@ -162,6 +165,7 @@ uv run --extra rl python scripts/train.py --help
 
 ```text
 checkpoints/13x13/<run_name>/
+├── initial_model.pth      # 固定数据更新对照的共同起点
 ├── reference_model.pth    # 固定参考，默认是本轮实验的初始模型
 ├── best_model.pth         # 初始为基线；通过交换执色评测后才更新
 ├── latest_model.pth       # 最近一次保存的训练模型
@@ -171,7 +175,9 @@ logs/13x13/<run_name>/
 ├── train_metrics.csv
 ├── selfplay_games.jsonl
 ├── evaluation.jsonl       # 对参考 / 最佳模型的成绩，含黑白分项
-├── evaluation_games.jsonl # 每局终止原因与分数
+├── evaluation_games.jsonl # 每局终止原因、分数、逐手记录和终局棋盘
+├── evaluation_sgf/        # 评测棋谱
+├── data/                  # 按局的 SGF / JSON / NPZ 归档及固定训练/验证划分
 └── events.out.tfevents.*  # 启用 TensorBoard 时生成
 ```
 
@@ -182,6 +188,7 @@ logs/13x13/<run_name>/
 | 记录 | 如何使用 |
 | --- | --- |
 | `truncation_rate`、`completed` | 截断超过 25% 会告警；大量未终局样本被丢弃，应先检查终局与手数上限 |
+| `target_entropy`、`policy_kl`、`val_*` | 同一批次目标熵与策略 KL，以及独立验证集指标；详细解释见训练实验指南 |
 | `buffer`、`optimizer_steps` | 更新次数为 0 表示尚未满足训练批大小，loss 空值不是 loss 为 0 |
 | `black_score_rate`、`mean_score_diff_completed` | 只统计正常终局；不能要求自博弈黑白胜率必然各 50% |
 | `mean_policy_entropy`、`mean_policy_max` | 结合棋局长度观察策略是否过早集中到少数落点 |
@@ -208,7 +215,7 @@ uv run --extra rl python scripts/export_onnx.py \
   --checkpoint checkpoints/13x13/bs13_v2/best_model.pth
 ```
 
-生成 `frontend/public/models/13x13/goplayer_v1.onnx` 和同名 `.json` 元数据，导出时执行 ONNX 格式检查。如果训练使用了自定义网络宽度或深度，导出时需要传入匹配的 `--num-channels` 和 `--num-res-blocks`。
+三通道模型生成 `frontend/public/models/13x13/goplayer_v1.onnx`，四通道 Pass 模型生成 `goplayer_v2.onnx`，同时输出同名 `.json` 元数据并检查 ONNX 格式。宽度、深度和输入版本从权重自动识别；可选的 `--num-channels` 和 `--num-res-blocks` 参数用于核对形状。
 
 不同棋盘尺寸需要分别训练。导出 13 / 19 路模型后，还需要修改 [modelConfig.ts](frontend/src/game/modelConfig.ts) 中对应尺寸的 `trained`、`modelPath` 和说明文字，前端才会启用 AI 按钮。网页仅使用策略网络单步推理，实际表现需要另外检验。
 
@@ -231,7 +238,9 @@ src/Goplayer/            Python 规则环境、棋盘与棋手
 src/rl/                  编码器、网络、批量 MCTS、自博弈 / 评测、数据增强、回放缓冲
 configs/train-13x13.json  13 路 GPU 实验配置
 scripts/train.py         自博弈训练与实验记录
+scripts/compare_updates.py 固定数据的更新次数对照
 scripts/export_onnx.py   模型导出
+docs/training-experiments.md 实验室运行与数据复用指南
 frontend/src/            React 页面、Canvas 棋盘、TypeScript 规则引擎
 frontend/public/models/ 浏览器模型与元数据
 docs/screenshots/        界面截图
@@ -255,4 +264,4 @@ Python（在项目根目录运行，需要 GUI 与训练依赖）：
 uv run --extra gui --extra rl python -m unittest discover -s tests -v
 ```
 
-测试覆盖规则与和棋、API 坐标转换、Qt 线程、网页过期 AI 请求，以及根节点噪声、批量搜索、策略目标、数据对称变换、回放抽样、截断标签和成对评测。训练策略测试使用固定局面或预设策略，不调用训练循环或优化器更新；外部 API 使用模拟响应。
+测试覆盖规则与和棋、API 坐标转换、Qt 线程、网页过期 AI 请求，以及根节点噪声、批量搜索、策略目标、数据对称变换、回放抽样、截断标签和成对评测。训练策略测试使用固定局面、预设策略与模拟更新，不执行真实梯度更新；还会验证归档读回、输入版本兼容、验证集不修改权重，以及三 / 四通道 ONNX 与 PyTorch 输出一致。外部 API 使用模拟响应。

@@ -24,7 +24,7 @@
   "save_interval": 10,
   "tensorboard": true,
   "seed": 42,
-  "input_features": "stones-v1",
+  "input_features": "pass-v2",
   "validation_fraction": 0.1,
   "validation_buffer_size": 20000
 }

@@ -46,6 +46,10 @@ def outcome_record(env):
         "black_score": black,
         "white_score": white,
         "score_diff": black - white,  # A position estimate only when truncated.
+        "board_size": env.size,
+        "komi": env.komi,
+        "move_sequence": [list(move) for move in env.moves_history],
+        "final_board": [row.copy() for row in env.grid],
     }
 
 
@@ -77,7 +81,7 @@ def play_self_play_batch(model, config, count, device, rng):
         )
         for i, policy, root_value in zip(active, policies, search.last_root_values):
             env, color = envs[i], colors[i]
-            histories[i].append((encode_state(env, color), policy.copy(), color))
+            histories[i].append((encode_state(env, color, getattr(model, "input_features", "stones-v1")), policy.copy(), color))
             positive = policy[policy > 0]
             entropies[i].append(float(-(positive * np.log(positive)).sum()))
             maxima[i].append(float(policy.max()))

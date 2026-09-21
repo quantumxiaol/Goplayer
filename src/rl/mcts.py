@@ -93,7 +93,8 @@ class MCTS:
             raise ValueError("num_simulations must be at least 1")
 
     def _evaluate_batch(self, environments, colors, device):
-        states = torch.stack([encode_state(env, color) for env, color in zip(environments, colors)]).to(device)
+        features = getattr(self.model, "input_features", "stones-v1")
+        states = torch.stack([encode_state(env, color, features) for env, color in zip(environments, colors)]).to(device)
         self.model.eval()
         with torch.inference_mode():
             logits, values = self.model(states)

@@ -39,12 +39,16 @@ else:
         Outputs policy logits and value in [-1, 1].
         """
 
-        def __init__(self, size: int = 9, num_channels: int = 64, num_res_blocks: int = 3):
+        def __init__(self, size: int = 9, num_channels: int = 64, num_res_blocks: int = 3,
+                     input_features: str = "stones-v1"):
             super().__init__()
+            from .encoder import FEATURE_CHANNELS
+            self.input_features = input_features
+            self.input_channels = FEATURE_CHANNELS[input_features]
             self.size = size
             self.action_size = size * size + 1  # +1 for pass
 
-            self.conv1 = nn.Conv2d(3, num_channels, kernel_size=3, padding=1)
+            self.conv1 = nn.Conv2d(self.input_channels, num_channels, kernel_size=3, padding=1)
             self.bn1 = nn.BatchNorm2d(num_channels)
             self.res_blocks = nn.ModuleList([ResBlock(num_channels) for _ in range(num_res_blocks)])
 

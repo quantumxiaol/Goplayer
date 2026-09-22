@@ -72,6 +72,29 @@ logs/13x13/bs13_compare_v3/
 
 先比较固定验证集的 `val_policy_kl`、`val_value_loss`：若训练指标下降而验证指标变差，应怀疑过拟合。若验证指标改善，再结合交换执色评测决定是否把在线训练更新次数改为 80；80 不是已经验证过的最佳值。
 
+### 两个已训练模型直接交手，并更换开局种子
+
+下面命令只评测，不重新训练。将 80 次分支设为候选、20 次分支设为对手：
+
+```bash
+uv run --extra rl python scripts/evaluate_checkpoints.py \
+  --candidate logs/13x13/bs13_compare_v3/updates-80/model.pth \
+  --opponent logs/13x13/bs13_compare_v3/updates-20/model.pth \
+  --seeds 20261 20262 --games-per-seed 20 \
+  --num-simulations 320 --device cuda \
+  --output-dir logs/13x13/bs13_head_to_head_v3
+```
+
+每个种子 20 局，包含 10 个开局、每个开局交换执色各下一局；两个种子总计 40 局。种子不同于之前固定的 `10042`。两边使用相同搜索预算、贴目和 Pass 限制，不加根节点噪声。除显式指定的搜索预算外，共同规则与搜索参数取自候选 checkpoint，脚本检查对手棋盘尺寸和贴目兼容性。
+
+`results.json` 保存按种子和总体统计，**所有胜负、得分率均从 candidate（这里为 80 次分支）的视角统计**，和棋计半分。`games.jsonl` 和 `seed-*-game-*.sgf` 保存每局记录，`evaluation_config.json` 保存两份权重的校验值与评测参数。截断局单独统计并从得分分母排除；存在截断时不要只看得分率。每个种子完成后更新结果，已有输出目录不会被覆盖。
+
+```bash
+cat logs/13x13/bs13_head_to_head_v3/results.json
+```
+
+40 局适合初步对照，不足以确认微小的棋力差异。后续可使用新种子或增加 `--games-per-seed`（必须为偶数），并使用新的输出目录。
+
 ## 3. Pass 输入单独实验
 
 ```bash
